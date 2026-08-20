@@ -71,7 +71,8 @@ class TradingState:
                     saved = json.load(f)
                 for k in ("positions", "trades", "orders", "equity_history", "balance_cash",
                           "day_start_equity", "day_date", "day_start_initialized",
-                          "strategy_stats", "mode_stats", "last_close_time", "events"):
+                          "strategy_stats", "mode_stats", "last_close_time", "events",
+                          "mainnet_baseline"):
                     if k in saved:
                         self.data[k] = saved[k]
                 # 同一天重启: 保留今日起始权益 (今日盈亏跨重启连续, 不归零)
