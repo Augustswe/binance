@@ -18,6 +18,8 @@ class ControlBody(BaseModel):
 class ApiBody(BaseModel):
     api_key: str = ""
     api_secret: str = ""
+    mainnet_key: str = ""
+    mainnet_secret: str = ""
 
 
 class SymbolsBody(BaseModel):
@@ -31,6 +33,10 @@ class ModesBody(BaseModel):
 class RiskBody(BaseModel):
     risk: dict = {}
     leverage: dict = {}
+
+
+class NetworkBody(BaseModel):
+    network: str = "testnet"
 
 
 def create_app(engine) -> FastAPI:
@@ -52,6 +58,7 @@ def create_app(engine) -> FastAPI:
     async def api_state():
         snap = engine.get_snapshot()
         snap["api"] = engine.api_status()   # 登录状态徽章用
+        snap["network"] = engine.cfg["network"]   # 主网红色横幅用
         return snap
 
     @app.get("/api/config")
@@ -59,6 +66,7 @@ def create_app(engine) -> FastAPI:
         cfg = engine.cfg
         return {
             "mode": cfg["mode"],
+            "network": cfg["network"],
             "timeframe": cfg["timeframe"],
             "symbols": cfg["symbols"],
             "leverage": cfg["leverage"],
@@ -121,6 +129,11 @@ def create_app(engine) -> FastAPI:
             "has_positions": list(engine.state.data["positions"].keys()),
             "risk": dict(engine.cfg["risk"]),
             "leverage": dict(engine.cfg["leverage"]),
+            "network": engine.cfg.get("network", "testnet"),
+            "mainnet_configured": bool(
+                (engine.cfg.get("api_mainnet") or {}).get("key")
+                and (engine.cfg.get("api_mainnet") or {}).get("secret")
+            ),
         }
 
     @app.post("/api/settings/modes")
@@ -159,7 +172,17 @@ def create_app(engine) -> FastAPI:
 
     @app.post("/api/settings/api")
     async def api_settings_api(body: ApiBody):
-        return engine.update_api(body.api_key, body.api_secret)
+        return engine.update_api(body.api_key, body.api_secret,
+                                  body.mainnet_key, body.mainnet_secret)
+
+    @app.post("/api/settings/network")
+    async def api_settings_network(body: NetworkBody):
+        """切换交易网络 (testnet/mainnet): 热生效, 无需重启
+
+        主网 = 真实资金, engine.set_network 内含服务端校验 (主网必须有 Key) 与
+        live 模式下的持仓清空, 防止误触。
+        """
+        return engine.set_network(body.network)
 
     @app.post("/api/settings/symbols")
     async def api_settings_symbols(body: SymbolsBody):

@@ -29,6 +29,19 @@ body {
 .logo { color: var(--yellow); font-size: 22px; }
 h1 { font-size: 17px; font-weight: 600; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+/* 主网红色警示横幅 */
+.net-banner {
+  background: var(--red); color: #fff; text-align: center;
+  font-size: 13px; font-weight: 700; padding: 8px 16px;
+  letter-spacing: .3px;
+  box-shadow: 0 2px 12px rgba(239, 83, 80, .4);
+  animation: net-blink 1.6s ease-in-out infinite;
+}
+@keyframes net-blink {
+  0%, 100% { background: var(--red); }
+  50% { background: #c62828; }
+}
 .badge {
   padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
   background: var(--panel2); border: 1px solid var(--border); color: var(--muted);
@@ -125,13 +138,15 @@ canvas#equity-chart { width: 100%; display: block; }
 }
 .modal {
   background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
-  width: 560px; max-width: 94vw; max-height: 86vh; display: flex; flex-direction: column;
+  width: 760px; max-width: 96vw; max-height: 94vh; display: flex; flex-direction: column;
 }
 .modal-head {
   display: flex; justify-content: space-between; align-items: center;
   padding: 14px 18px; font-weight: 600; border-bottom: 1px solid var(--border);
 }
-.modal-body { padding: 16px 18px; overflow-y: auto; }
+.modal-body { padding: 16px 18px; overflow-y: auto; overscroll-behavior: contain; }
+/* 弹窗打开时锁死 body 滚动, 解决"滚动穿透"(在弹窗内滚动会带动背景页面) */
+body.modal-open { overflow: hidden; }
 .modal-sec { margin-bottom: 12px; }
 .modal-sec-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
 .modal-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -155,6 +170,23 @@ canvas#equity-chart { width: 100%; display: block; }
 .chip-add:hover { background: var(--green-bg); }
 .chip-locked { opacity: .5; cursor: not-allowed; }
 .modal-msg { margin-top: 10px; font-size: 13px; min-height: 18px; word-break: break-all; }
+
+/* 交易网络切换 */
+.net-sec { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: rgba(255,255,255,.02); }
+.net-toggle { display: flex; gap: 10px; margin: 4px 0 10px; }
+.net-opt {
+  flex: 1; padding: 10px 12px; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--panel2); color: var(--muted);
+  transition: all .15s;
+}
+.net-opt:hover { border-color: var(--blue); color: var(--text); }
+.net-opt[data-net="testnet"].active { border-color: var(--green); background: var(--green-bg); color: var(--green); }
+.net-opt[data-net="mainnet"].active { border-color: var(--red); background: var(--red-bg); color: var(--red); }
+.net-mainnet-box { margin-top: 6px; }
+.net-warn {
+  font-size: 12px; color: var(--red); background: var(--red-bg);
+  border: 1px solid var(--red); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+}
 
 /* 风控与敞口面板 */
 .risk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }

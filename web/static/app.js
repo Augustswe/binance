@@ -42,7 +42,16 @@ async function loadConfig() {
     cfg = await r.json();
     $("mode-badge").textContent = cfg.mode === "live" ? "LIVE 测试网" : "PAPER 模拟";
     $("mode-badge").className = "badge " + (cfg.mode === "live" ? "badge-live" : "badge-paper");
+    updateNetBanner();
   } catch (e) { /* ignore */ }
+}
+
+// 主网红色横幅: 仅当 network=mainnet 时显示
+function updateNetBanner() {
+  const banner = $("net-banner");
+  if (!banner) return;
+  const net = (cfg && cfg.network) || lastSnapshot?.network || "testnet";
+  banner.style.display = net === "mainnet" ? "block" : "none";
 }
 
 // ---------------- 自动学习历史 ----------------
@@ -140,6 +149,9 @@ async function refresh() {
   drawChart(s.equity_history, s.day_start_equity);
   lastSnapshot = s;
 
+  // 主网横幅: 跟随实时快照 (切换网络后无需刷新页面即变)
+  updateNetBanner();
+
   // 行情持仓表
   renderSymbols(s);
   renderSignals(s);
@@ -186,6 +198,7 @@ function renderSymbols(s) {
         if (pos && k.startsWith(pos.mode + ":")) break;
       }
     }
+    const showLev = pos ? pos.leverage : sig.leverage;   // 有持仓显示真实杠杆, 无持仓显示计划杠杆
     const chgCls = chg >= 0 ? "pos" : "neg";
     html += `<tr>
       <td><b>${sym}</b></td>
@@ -194,7 +207,7 @@ function renderSymbols(s) {
       <td>${regimePill(sig.regime)}</td>
       <td>${scoreBar(sig.combined != null ? sig.combined : sig.score)}</td>
       <td>${sig.mode ? (MODE_LABELS[sig.mode] || sig.mode) : "--"}</td>
-      <td class="mono">${sig.leverage ? sig.leverage + "x" : "--"}</td>
+      <td class="mono" title="${pos ? '实际持仓杠杆 (开仓时定, 持仓期间不变)' : '计划开仓杠杆 (按信号强度动态)'}">${showLev ? showLev + "x" : "--"}</td>
       <td>${pos ? posPill(pos) : '<span class="pill pill-none">空仓</span>'}</td>
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
       <td class="mono ${cls(pos ? pos.upnl : 0)}">${pos ? sign(pos.upnl) + fmt(pos.upnl) : "--"}</td>
@@ -607,6 +620,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderModeSettings();
       renderSymbolList();
       renderRiskSettings();
+      renderNetworkSettings();
     } catch (e) {
       setMsg("❌ 加载设置失败: " + e, true);
     }
@@ -711,14 +725,19 @@ function renderModeSettings() {
 
   $("btn-settings").addEventListener("click", () => {
     $("settings-modal").style.display = "flex";
+    document.body.classList.add("modal-open");   // 锁定背景滚动, 防穿透
     setMsg("");
     loadSettings();
   });
   $("btn-settings-close").addEventListener("click", () => {
     $("settings-modal").style.display = "none";
+    document.body.classList.remove("modal-open");
   });
   $("settings-modal").addEventListener("click", (e) => {
-    if (e.target.id === "settings-modal") $("settings-modal").style.display = "none";
+    if (e.target.id === "settings-modal") {
+      $("settings-modal").style.display = "none";
+      document.body.classList.remove("modal-open");
+    }
   });
   $("btn-symbol-search").addEventListener("click", doSearch);
   $("set-symbol-search").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
@@ -786,6 +805,81 @@ function renderModeSettings() {
     }
   }
   $("btn-save-risk").addEventListener("click", saveRisk);
+
+  // ---------------- 交易网络切换 ----------------
+  function renderNetworkSettings() {
+    const net = settingsData.network || (cfg && cfg.network) || "testnet";
+    const statusEl = $("set-net-status");
+    if (statusEl) {
+      statusEl.textContent = net === "mainnet"
+        ? "💰 主网 (真实资金)" : "🧪 测试网 (虚拟资金)";
+      statusEl.style.color = net === "mainnet" ? "var(--red)" : "var(--green)";
+    }
+    // 高亮当前选项
+    document.querySelectorAll(".net-opt").forEach(b => {
+      b.classList.toggle("active", b.dataset.net === net);
+    });
+    // 主网输入框: 仅在主网时显示 (便于提前填好 Key)
+    const box = $("set-mainnet-box");
+    if (box) box.style.display = net === "mainnet" ? "block" : "none";
+  }
+
+  async function switchNetwork(net) {
+    if (net === "mainnet") {
+      const ok = confirm(
+        "⚠️ 即将切换到【主网 / 真实资金】模式！\n\n" +
+        "此模式下的每一笔开仓/平仓都会动用你的真实资产。\n" +
+        "请确保:\n  · 已在下方填好主网 API Key/Secret\n  · 已合理设置风控与敞口上限\n\n" +
+        "确认切换? (取消则停留在测试网)"
+      );
+      if (!ok) { renderNetworkSettings(); return; }
+    } else {
+      const ok = confirm("切换回【测试网 / 虚拟资金】? (测试网使用虚拟资金, 不影响真实账户)");
+      if (!ok) { renderNetworkSettings(); return; }
+    }
+    setMsg("切换网络中…");
+    const res = await fetch("/api/settings/network", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ network: net }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已切换" : "切换失败"), !res.ok);
+    if (res.ok) {
+      settingsData.network = res.network;
+      if (cfg) cfg.network = res.network;
+      updateNetBanner();
+      renderNetworkSettings();
+      // 网络切换可能影响登录状态, 重新拉取一遍
+      loadSettings();
+    } else {
+      renderNetworkSettings();
+    }
+  }
+
+  document.querySelectorAll(".net-opt").forEach(b => {
+    b.addEventListener("click", () => {
+      const target = b.dataset.net;
+      const cur = settingsData.network || (cfg && cfg.network) || "testnet";
+      if (target === cur) return;
+      switchNetwork(target);
+    });
+  });
+
+  $("btn-save-mainnet").addEventListener("click", async () => {
+    const key = $("set-mainnet-key").value.trim();
+    const secret = $("set-mainnet-secret").value.trim();
+    if (!key && !secret) { setMsg("请填写主网 API Key 和 Secret", true); return; }
+    setMsg("保存主网 API 中…");
+    const res = await fetch("/api/settings/api", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mainnet_key: key, mainnet_secret: secret }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 主网 API 已保存" : "保存失败"), !res.ok);
+    if (res.ok) {
+      settingsData.mainnet_configured = true;
+      $("set-mainnet-key").value = "";
+      $("set-mainnet-secret").value = "";
+    }
+  });
 
   window.addEventListener("resize", () => {
     if (lastSnapshot) drawChart(lastSnapshot.equity_history, lastSnapshot.day_start_equity);

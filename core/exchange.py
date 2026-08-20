@@ -28,12 +28,20 @@ class BinanceFutures:
     def __init__(self, cfg: dict, base_url: str | None = None):
         self.cfg = cfg
         self.log = get_logger("exchange")
-        self.base_url = base_url or DEFAULT_BASE_URL
+        self.network = (cfg.get("network") or "testnet")
+        if base_url:
+            self.base_url = base_url
+        else:
+            self.base_url = MAINNET_BASE_URL if self.network == "mainnet" else DEFAULT_BASE_URL
         self.mode = cfg["mode"]
-        self.api_key = cfg["api"]["key"]
-        self.api_secret = cfg["api"]["secret"]
+        # 主网/测试网使用各自独立的 API Key
+        ap = cfg.get("api_mainnet") if self.network == "mainnet" else cfg.get("api")
+        self.api_key = (ap or {}).get("key", "")
+        self.api_secret = (ap or {}).get("secret", "")
+        env_name = ("BINANCE_API_KEY / BINANCE_API_SECRET" if self.network == "mainnet"
+                    else "BINANCE_TESTNET_API_KEY / BINANCE_TESTNET_API_SECRET")
         if self.mode == "live" and (not self.api_key or not self.api_secret):
-            raise ExchangeError("live 模式需要配置 BINANCE_TESTNET_API_KEY / BINANCE_TESTNET_API_SECRET")
+            raise ExchangeError(f"{self.network} live 模式需要配置 {env_name}")
         self.session = requests.Session()
         self._info_cache: dict[str, Any] | None = None
 

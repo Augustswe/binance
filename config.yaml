@@ -4,6 +4,7 @@
 
 # 交易模式: paper = 模拟下单(无需API Key), live = 真实测试网下单(需要API Key)
 mode: live
+network: testnet
 
 # 策略模式: multi = 多策略自适应评分 | donchian = Donchian通道突破趋势跟踪(长周期, 4年回测5币全正)
 strategy_mode: donchian
@@ -136,6 +137,7 @@ learner:
 logging:
   level: INFO
   file: logs/quant.log
+
 
 
 

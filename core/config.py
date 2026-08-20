@@ -121,6 +121,61 @@ def update_config_risk(risk: dict, leverage: dict) -> None:
     path.write_text(text + "\n", encoding="utf-8")
 
 
+def update_config_network(network: str) -> None:
+    """更新 config.yaml 顶层 network 键 (testnet/mainnet), 保留注释与顺序
+
+    Web 设置面板"主网/测试网"切换时调用, 重启后依然生效。
+    """
+    if network not in ("testnet", "mainnet"):
+        raise ValueError("network 仅支持 testnet / mainnet")
+    path = BASE_DIR / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    out: list[str] = []
+    replaced = False
+    for line in lines:
+        m = re.match(r"^network:\s*(\S+)?\s*$", line)
+        if m and not replaced:
+            out.append(f"network: {network}")
+            replaced = True
+            continue
+        out.append(line)
+    if not replaced:
+        # network 键不存在: 在 mode 行后插入
+        out2: list[str] = []
+        inserted = False
+        for line in out:
+            out2.append(line)
+            if re.match(r"^mode:\s", line) and not inserted:
+                out2.append(f"network: {network}")
+                inserted = True
+        out = out2
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def update_env_mainnet_api(key: str, secret: str) -> None:
+    """更新 .env 中的主网 API Key/Secret (保留其它配置与注释)"""
+    env_path = BASE_DIR / ".env"
+    text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    lines = text.split("\n")
+    out: list[str] = []
+    k_set = s_set = False
+    for line in lines:
+        if line.startswith("BINANCE_API_KEY="):
+            out.append(f"BINANCE_API_KEY={key}")
+            k_set = True
+        elif line.startswith("BINANCE_API_SECRET="):
+            out.append(f"BINANCE_API_SECRET={secret}")
+            s_set = True
+        else:
+            out.append(line)
+    if not k_set:
+        out.append(f"BINANCE_API_KEY={key}")
+    if not s_set:
+        out.append(f"BINANCE_API_SECRET={secret}")
+    env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
 def update_env_api(key: str, secret: str) -> None:
     """更新 .env 中的测试网 API Key/Secret (保留其他配置与注释)"""
     env_path = BASE_DIR / ".env"
@@ -182,6 +237,15 @@ def load_config(path: str | None = None) -> dict:
     cfg.setdefault("telegram", {})
     cfg["telegram"]["bot_token"] = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     cfg["telegram"]["chat_id"] = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    # 主网 API (与测试网 Key 完全独立); network=mainnet 时下单走真实资金
+    cfg.setdefault("api_mainnet", {})
+    cfg["api_mainnet"]["key"] = os.getenv("BINANCE_API_KEY", "").strip()
+    cfg["api_mainnet"]["secret"] = os.getenv("BINANCE_API_SECRET", "").strip()
+    # 网络: testnet (默认, 虚拟资金) / mainnet (真实资金)
+    net = os.getenv("TRADING_NETWORK", "").strip().lower()
+    if net in ("testnet", "mainnet"):
+        cfg["network"] = net
+    cfg.setdefault("network", "testnet")
     # 合并 AI 调参结果
     _merge_tuned(cfg)
     return cfg

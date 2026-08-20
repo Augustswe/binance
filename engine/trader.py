@@ -175,24 +175,47 @@ class TradingEngine:
         self.log.info("交易对更新: %s", symbols)
         return {"ok": True, "symbols": symbols, "added": sorted(added), "removed": sorted(removed)}
 
-    def update_api(self, key: str, secret: str) -> dict:
-        """热更新测试网 API Key/Secret (Web 设置面板): 写 .env + 更新内存
+    def update_api(self, key: str = "", secret: str = "",
+                   mainnet_key: str = "", mainnet_secret: str = "") -> dict:
+        """热更新 API Key/Secret (Web 设置面板): 写 .env + 更新内存
 
-        live 模式下用新凭据立即验证一次账户接口
+        - key/secret         → 测试网 (BINANCE_TESTNET_API_KEY/SECRET)
+        - mainnet_key/secret → 主网 (BINANCE_API_KEY/SECRET)
+        只用当前生效网络的凭据去热更新交易所客户端, 避免把测试网 Key 套到主网客户端。
         """
         key, secret = key.strip(), secret.strip()
-        from core.config import update_env_api
+        mainnet_key, mainnet_secret = mainnet_key.strip(), mainnet_secret.strip()
+        from core.config import update_env_api, update_env_mainnet_api
 
-        try:
-            update_env_api(key, secret)
-        except Exception as e:
-            return {"ok": False, "msg": f"❌ 写入 .env 失败: {e}"}
+        if key or secret:
+            try:
+                update_env_api(key, secret)
+            except Exception as e:
+                return {"ok": False, "msg": f"❌ 写入 .env (测试网) 失败: {e}"}
+            self.cfg["api"]["key"] = key
+            self.cfg["api"]["secret"] = secret
 
-        self.exchange.set_credentials(key, secret)
-        self.cfg["api"]["key"] = key
-        self.cfg["api"]["secret"] = secret
+        if mainnet_key or mainnet_secret:
+            try:
+                update_env_mainnet_api(mainnet_key, mainnet_secret)
+            except Exception as e:
+                return {"ok": False, "msg": f"❌ 写入 .env (主网) 失败: {e}"}
+            self.cfg["api_mainnet"]["key"] = mainnet_key
+            self.cfg["api_mainnet"]["secret"] = mainnet_secret
 
-        if self.cfg["mode"] == "live":
+        # 用当前生效网络的凭据热更新交易所客户端
+        ap = self.cfg.get("api_mainnet") if self.cfg.get("network") == "mainnet" else self.cfg.get("api")
+        if (ap or {}).get("key") and (ap or {}).get("secret"):
+            self.exchange.set_credentials(ap["key"], ap["secret"])
+
+        # 仅当"更新的凭据属于当前生效网络"时才即时验证; 否则切换网络时由 set_network 验证
+        # (避免把测试网钱包余额误报成主网, 造成误导)
+        active_net = self.cfg.get("network", "testnet")
+        updated_for_active = (
+            (active_net == "testnet" and (key or secret))
+            or (active_net == "mainnet" and (mainnet_key or mainnet_secret))
+        )
+        if self.cfg["mode"] == "live" and updated_for_active:
             try:
                 acc = self.exchange.get_account()
                 wallet = float(acc.get("totalWalletBalance", 0.0))
@@ -211,8 +234,13 @@ class TradingEngine:
                 return {"ok": True, "msg": f"⚠️ API 已写入 .env, 但验证失败: {str(e)[:80]}"}
 
         self._api_verified = None
-        self.state.add_event("info", "🔑 API 已更新 (paper 模式无需验证)")
-        return {"ok": True, "msg": "✅ API 已保存"}
+        if updated_for_active:
+            self.state.add_event("info", "🔑 API 已更新 (paper 模式无需验证)")
+            return {"ok": True, "msg": "✅ API 已保存"}
+        # 跨网络保存 (如测试网模式下填主网 Key): 不即时验证, 切换时自动验证
+        net_label = "主网" if (mainnet_key or mainnet_secret) else "测试网"
+        self.state.add_event("info", f"🔑 {net_label} API 已保存 (切换到该网络后自动验证)")
+        return {"ok": True, "msg": f"✅ {net_label} API 已保存 (切换到该网络后自动验证)"}
 
     def _verify_api(self) -> None:
         """启动时验证 API 登录状态 (live 模式)"""
@@ -265,14 +293,55 @@ class TradingEngine:
 
     def api_status(self) -> dict:
         """API 登录状态 (供 Web 展示): verified True=已登录 / False=未登录 / None=无需"""
-        key = self.cfg["api"].get("key", "")
+        network = self.cfg.get("network", "testnet")
+        ap = self.cfg.get("api_mainnet") if network == "mainnet" else self.cfg.get("api")
+        key = (ap or {}).get("key", "")
         return {
             "mode": self.cfg["mode"],
+            "network": network,
             "configured": bool(key),
             "verified": self._api_verified,
             "wallet": self._api_wallet,
             "key_masked": (key[:6] + "****" + key[-4:]) if len(key) > 12 else (key[:4] + "****" if key else ""),
         }
+
+    def set_network(self, network: str) -> dict:
+        """热切换交易网络 (testnet/mainnet): 重建交易所客户端并落盘, 无需重启
+
+        主网 = 真实资金, 需先配置主网 API Key (BINANCE_API_KEY/SECRET)。switch 前
+        前端已二次确认; 这里再做一道服务端校验, 防止误触。
+        """
+        if network not in ("testnet", "mainnet"):
+            return {"ok": False, "msg": "❌ network 仅支持 testnet / mainnet"}
+        if network == "mainnet" and not (self.cfg.get("api_mainnet", {}).get("key")
+                                         and self.cfg.get("api_mainnet", {}).get("secret")):
+            return {"ok": False, "msg": "❌ 主网需先在 ⚙️ 设置 填写主网 API Key/Secret (BINANCE_API_KEY/SECRET)"}
+        # 主网属于真实资金: live 模式切换时清空本地持仓, 交由下一轮账户同步重建,
+        # 避免基于旧网络持仓误下单
+        if self.cfg["mode"] == "live" and network != self.cfg.get("network"):
+            self.state.data["positions"] = {}
+            self.state.data["orders"] = []
+        self.cfg["network"] = network
+        # 重建交易所客户端 (base_url + 凭据随 network 改变)
+        self.exchange = BinanceFutures(self.cfg)
+        self.execution.exchange = self.exchange
+        try:
+            from core.config import update_config_network
+            update_config_network(network)
+        except Exception as e:
+            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {e}"}
+        # 重新验证登录 (live 模式)
+        self._api_verified = None
+        self._api_wallet = None
+        if self.cfg["mode"] == "live":
+            self._verify_api()
+        label = "主网(真实资金)" if network == "mainnet" else "测试网(虚拟资金)"
+        self.state.add_event(
+            "system" if network == "testnet" else "risk",
+            f"🌐 已切换交易网络 → {label}"
+            + (" ⚠️ 注意: 真实资金, 请确认风控参数" if network == "mainnet" else ""),
+        )
+        return {"ok": True, "msg": f"✅ 已切换至 {label}", "network": network}
 
     # ---------------- 主循环 ----------------
     async def _loop(self):
