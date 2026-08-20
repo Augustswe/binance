@@ -213,7 +213,7 @@ body.modal-open { overflow: hidden; }
 .net-countdown.cd-done { border: 1px solid var(--green); border-radius: 12px; padding: 4px; background: var(--green-bg); }
 .disclaimer {
   text-align: center; font-size: 12px; color: var(--muted);
-  padding: 10px 16px; border-top: 1px solid var(--border); background: var(--panel);
+  padding: 10px 16px; border-top: 1px solid var(--border);
 }
 
 /* 风控与敞口面板 */
