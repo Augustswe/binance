@@ -141,7 +141,7 @@ TRADING_MODE=paper   # 先模拟
 
 ### 4. 切换到真实测试网下单（live）
 
-1. 打开 https://testnet.binancefuture.com（U本位合约测试网；现货测试网 testnet.binance.vision 的 Key 与本系统不通用），GitHub 账号登录
+1. 打开 https://testnet.binancefuture.com（U本位合约测试网；现货测试网 testnet.binance.vision 的 Key 与本系统不通用）
 2. 创建 API Key，保存 **API Key** 和 **Secret Key**
 3. 页面底部点 **Request testnet funds** 领取测试资金（每次 10,000 USDT）
 4. 编辑 `.env`：
