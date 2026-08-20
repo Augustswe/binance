@@ -243,6 +243,16 @@ class BinanceFutures:
         """用户成交明细 (逐笔成交, 交易所权威记录)"""
         return self._signed("GET", "/fapi/v1/userTrades", symbol=symbol, limit=int(limit))
 
+    def get_income(self, start_ms: int | None = None, end_ms: int | None = None,
+                   limit: int = 1000) -> list[dict]:
+        """资金流水 (REALIZED_PNL/COMMISSION/FUNDING_FEE/TRANSFER 等, 交易所权威)"""
+        params: dict = {"limit": int(limit)}
+        if start_ms:
+            params["startTime"] = int(start_ms)
+        if end_ms:
+            params["endTime"] = int(end_ms)
+        return self._signed("GET", "/fapi/v1/income", **params)
+
     def set_leverage(self, symbol: str, leverage: int) -> dict:
         return self._signed("POST", "/fapi/v1/leverage", symbol=symbol, leverage=int(leverage))
 

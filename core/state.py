@@ -19,7 +19,8 @@ def utc_now() -> datetime:
 
 
 def utc_today_str() -> str:
-    return utc_now().strftime("%Y-%m-%d")
+    """用本地时区日期 (用户可见口径: 今日盈亏按本地0点算, 而非UTC)"""
+    return datetime.now().strftime("%Y-%m-%d")
 
 
 class TradingState:
@@ -68,10 +69,14 @@ class TradingState:
                 with open(STATE_FILE, "r", encoding="utf-8") as f:
                     saved = json.load(f)
                 for k in ("positions", "trades", "orders", "equity_history", "balance_cash",
-                          "day_start_equity", "day_date", "strategy_stats",
-                          "last_close_time", "events"):
+                          "day_start_equity", "day_date", "day_start_initialized",
+                          "strategy_stats", "last_close_time", "events"):
                     if k in saved:
                         self.data[k] = saved[k]
+                # 同一天重启: 保留今日起始权益 (今日盈亏跨重启连续, 不归零)
+                if saved.get("day_date") == utc_today_str() and saved.get("day_start_initialized"):
+                    self.data["day_start_initialized"] = True
+                # 跨天重启: 今日起始由 check_day_rollover 重新初始化
                 if len(self.data["events"]) > 200:
                     self.data["events"] = self.data["events"][-200:]
                 self.log.info("已从 %s 恢复状态 (%d 持仓, %d 笔历史成交, %d 条日志)",

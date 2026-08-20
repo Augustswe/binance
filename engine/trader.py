@@ -225,6 +225,35 @@ class TradingEngine:
             self._api_wallet = None
             self.log.error("API 登录验证失败: %s", str(e)[:100])
 
+    def _estimate_today_start_equity(self) -> float | None:
+        """估算今天(本地时区)0点的权益 (交易所 income 反推, 只用于 live 模式)
+
+        今日0点权益 ≈ 当前钱包余额 - 今日已发生资金流水(盈亏/手续费/资金费)
+        这样今日盈亏从本地0点算起, 系统当天中途启动/重启也不会"重新计算"
+        """
+        if self.cfg["mode"] != "live":
+            return None
+        try:
+            import datetime
+
+            now_local = datetime.datetime.now()
+            t0 = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            t0_ms = int(t0.timestamp() * 1000)   # 本地0点 → UTC 毫秒
+            acc = self.exchange.get_account()
+            wallet = float(acc.get("totalWalletBalance", 0.0))
+            incomes = self.exchange.get_income(start_ms=t0_ms)
+            # 今日资金流水合计 (排除入金/出金, 它不算盈亏)
+            today_flow = sum(
+                float(i.get("income", 0))
+                for i in incomes
+                if i.get("incomeType") not in ("TRANSFER", "DEPOSIT", "WITHDRAW")
+            )
+            est = wallet - today_flow
+            return round(est, 2) if est > 0 else None
+        except Exception as e:
+            self.log.warning("估算今日0点权益失败: %s", str(e)[:80])
+            return None
+
     def api_status(self) -> dict:
         """API 登录状态 (供 Web 展示): verified True=已登录 / False=未登录 / None=无需"""
         key = self.cfg["api"].get("key", "")
@@ -298,11 +327,23 @@ class TradingEngine:
         if len(d["equity_history"]) > 5000:
             d["equity_history"] = d["equity_history"][-2000:]
 
-        # 3.5) 今日起始权益初始化 (以真实权益为起点, 避免 live 模式误熔断)
+        # 3.5) 今日起始权益初始化
+        # 优先用"今天 UTC 0 点"的权益 (income 反推), 而不是启动时刻权益:
+        # 这样即使系统当天中途启动/重启, 今日盈亏都从 0 点算起, 不会"重新计算"
         if not d.get("day_start_initialized"):
-            d["day_start_equity"] = self.state.equity()
+            est = self._estimate_today_start_equity()
+            if est is not None and est > 0:
+                d["day_start_equity"] = est
+            else:
+                d["day_start_equity"] = self.state.equity()
             d["day_start_initialized"] = True
-            self.log.info("今日起始权益初始化: %.2f", d["day_start_equity"])
+            self.log.info("今日起始权益初始化: %.2f (今日0点估算%s)",
+                          d["day_start_equity"], "" if est else "[失败,用当前权益]")
+            self.state.add_event(
+                "info",
+                f"📅 今日起始权益: {d['day_start_equity']:.2f} U (从今天0点起算)"
+                if est else f"📅 今日起始权益: {d['day_start_equity']:.2f} U (无历史数据,从当前起算)",
+            )
 
         # 4) 止盈止损
         await self._check_tp_sl()
