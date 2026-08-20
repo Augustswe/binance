@@ -161,7 +161,6 @@ async function refresh() {
 
   // 行情持仓表
   renderSymbols(s);
-  renderManualTPSL(s);
   renderSignals(s);
   renderTrades(s);
   renderModes(s);
@@ -193,11 +192,29 @@ function setVal(id, text, clsName) {
   el.className = "value mono" + (clsName ? " " + clsName : "");
 }
 
+let tpslOpenSym = null;   // 当前展开止盈止损编辑的交易对
+let tpslCache = {};       // 编辑中输入值缓存, 跨 5s 轮询保留, 避免丢内容/丢焦点
+
 function renderSymbols(s) {
   const tb = document.querySelector("#symbols-table tbody");
   const posMap = {};
   s.positions.forEach((p) => { posMap[p.symbol] = p; });
   const order = cfg ? cfg.symbols : Object.keys(s.prices);
+  if (tpslOpenSym && !tpslCache[tpslOpenSym]) tpslCache[tpslOpenSym] = {};
+
+  // 编辑中: 先缓存输入值 + 记录焦点, 避免 5s 轮询重建时丢内容/丢焦点
+  let activeField = null;
+  if (tpslOpenSym) {
+    const det = document.querySelector(".tpsl-detail[data-sym='" + tpslOpenSym + "']");
+    if (det) {
+      ["tp-type", "tp-val", "sl-type", "sl-val"].forEach((c) => {
+        const el = det.querySelector("." + c);
+        if (el) tpslCache[tpslOpenSym][c] = el.value;
+        if (el && document.activeElement === el) activeField = c;
+      });
+    }
+  }
+
   let html = "";
   for (const sym of order) {
     const price = s.prices[sym];
@@ -213,7 +230,11 @@ function renderSymbols(s) {
     }
     const showLev = pos ? pos.leverage : sig.leverage;   // 有持仓显示真实杠杆, 无持仓显示计划杠杆
     const chgCls = chg >= 0 ? "pos" : "neg";
-    html += `<tr>
+    const open = pos && tpslOpenSym === sym;
+    const opCell = pos
+      ? `<button class="btn btn-ghost btn-sm tpsl-btn" data-sym="${sym}">${open ? "收起" : "⚙ 止盈止损"}</button>`
+      : "--";
+    html += `<tr data-sym="${sym}">
       <td><b>${sym}</b></td>
       <td class="mono">${fmtPrice(price)}</td>
       <td class="mono ${chgCls}">${chg == null ? "--" : sign(chg) + fmt(chg, 2) + "%"}</td>
@@ -225,9 +246,23 @@ function renderSymbols(s) {
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
       <td class="mono ${cls(pos ? pos.upnl : 0)}">${pos ? sign(pos.upnl) + fmt(pos.upnl) : "--"}</td>
       <td class="mono">${pos ? tpSlCell(pos) : "--"}</td>
+      <td>${opCell}</td>
     </tr>`;
+    if (open) html += tpslDetailRow(pos);
   }
-  tb.innerHTML = html || `<tr><td colspan="11" class="empty">暂无数据</td></tr>`;
+  tb.innerHTML = html || `<tr><td colspan="12" class="empty">暂无数据</td></tr>`;
+
+  // 事件绑定
+  tb.querySelectorAll(".tpsl-btn").forEach((b) => { b.onclick = () => toggleTpsl(b.dataset.sym); });
+  tb.querySelectorAll(".tpsl-apply").forEach((b) => { b.onclick = onTpslApply; });
+  tb.querySelectorAll(".tpsl-clear").forEach((b) => { b.onclick = onTpslClear; });
+
+  // 恢复焦点到正在编辑的输入框 (轮询重建后不打断输入)
+  if (activeField && tpslOpenSym) {
+    const det = document.querySelector(".tpsl-detail[data-sym='" + tpslOpenSym + "']");
+    const el = det && det.querySelector("." + activeField);
+    if (el) { el.focus(); const v = el.value; el.value = ""; el.value = v; }
+  }
 }
 
 function posPill(p) {
@@ -282,84 +317,60 @@ function setActiveSigTab(mode) {
   });
 }
 
-function renderManualTPSL(s) {
-  const tbody = document.querySelector("#manual-tpsl-table tbody");
-  const empty = document.getElementById("manual-tpsl-empty");
-  if (!tbody) return;
-  // 正在编辑本表时不打断 (保留输入焦点与内容)
-  if (document.activeElement && document.activeElement.closest &&
-      document.activeElement.closest("#manual-tpsl-table")) return;
-  const positions = s.positions || [];
-  if (positions.length === 0) {
-    tbody.innerHTML = "";
-    if (empty) empty.style.display = "block";
-    return;
-  }
-  if (empty) empty.style.display = "none";
-  // 缓存当前输入值, 轮询刷新时不覆盖用户正在填的内容
-  const cache = {};
-  tbody.querySelectorAll("tr[data-sym]").forEach(tr => {
-    const sym = tr.getAttribute("data-sym");
-    cache[sym] = {
-      tpType: tr.querySelector(".tp-type") && tr.querySelector(".tp-type").value,
-      tpVal: tr.querySelector(".tp-val") && tr.querySelector(".tp-val").value,
-      slType: tr.querySelector(".sl-type") && tr.querySelector(".sl-type").value,
-      slVal: tr.querySelector(".sl-val") && tr.querySelector(".sl-val").value,
-    };
-  });
-  tbody.innerHTML = "";
-  const f2 = x => (x == null || isNaN(x)) ? "--" : Number(x).toLocaleString(undefined, {maximumFractionDigits: 2});
-  for (const p of positions) {
-    const sym = p.symbol;
-    const side = p.side === "LONG" ? "做多 ▲" : "做空 ▼";
-    const mark = (p.mark != null) ? p.mark : (p.entry || "--");
-    const mtp = p.manual_tp || null;
-    const msl = p.manual_sl || null;
-    const c = cache[sym] || {};
-    const tpType = c.tpType || (mtp ? mtp.type : "price");
-    const tpVal = (c.tpVal !== undefined && c.tpVal !== "") ? c.tpVal : (mtp ? mtp.value : "");
-    const slType = c.slType || (msl ? msl.type : "price");
-    const slVal = (c.slVal !== undefined && c.slVal !== "") ? c.slVal : (msl ? msl.value : "");
-    const tr = document.createElement("tr");
-    tr.setAttribute("data-sym", sym);
-    tr.innerHTML = `
-      <td class="mono">${sym}</td>
-      <td>${side}</td>
-      <td class="mono">${f2(p.entry)}</td>
-      <td class="mono" id="mtp-mark-${sym}">${f2(mark)}</td>
-      <td>
-        <select class="tp-type input mini">${opt(tpType, "price", "价格")}${opt(tpType, "pct", "百分比%")}</select>
-        <input class="tp-val input mini" type="number" step="any" placeholder="TP" value="${tpVal}">
-      </td>
-      <td>
-        <select class="sl-type input mini">${opt(slType, "price", "价格")}${opt(slType, "pct", "百分比%")}</select>
-        <input class="sl-val input mini" type="number" step="any" placeholder="SL" value="${slVal}">
-      </td>
-      <td>
-        <button class="btn btn-ok btn-sm" data-act="apply">应用</button>
-        <button class="btn btn-ghost btn-sm" data-act="clear">清除</button>
-      </td>`;
-    tbody.appendChild(tr);
-  }
-  // 事件委托: 应用 / 清除
-  tbody.querySelectorAll("button[data-act]").forEach(btn => {
-    btn.onclick = async () => {
-      const tr = btn.closest("tr");
-      const sym = tr.getAttribute("data-sym");
-      const act = btn.getAttribute("data-act");
-      if (act === "clear") { await postManualTPSL(sym, null, null); return; }
-      const tpType = tr.querySelector(".tp-type").value;
-      const tpVal = tr.querySelector(".tp-val").value;
-      const slType = tr.querySelector(".sl-type").value;
-      const slVal = tr.querySelector(".sl-val").value;
-      const tp = tpVal !== "" ? {type: tpType, value: parseFloat(tpVal)} : null;
-      const sl = slVal !== "" ? {type: slType, value: parseFloat(slVal)} : null;
-      if (!tp && !sl) { alert("请至少填写一个 止盈(TP) 或 止损(SL)"); return; }
-      if (tp && isNaN(tp.value)) { alert("TP 数值无效"); return; }
-      if (sl && isNaN(sl.value)) { alert("SL 数值无效"); return; }
-      await postManualTPSL(sym, tp, sl);
-    };
-  });
+// 持仓行内联止盈止损: 点击「⚙ 止盈止损」就地展开编辑, 市价单 (触发即市价成交)
+function tpslDetailRow(p) {
+  const sym = p.symbol;
+  const mtp = p.manual_tp || null;
+  const msl = p.manual_sl || null;
+  const c = tpslCache[sym] || {};
+  const tpType = c["tp-type"] || (mtp ? mtp.type : "price");
+  const tpVal = (c["tp-val"] !== undefined && c["tp-val"] !== "") ? c["tp-val"] : (mtp ? mtp.value : "");
+  const slType = c["sl-type"] || (msl ? msl.type : "price");
+  const slVal = (c["sl-val"] !== undefined && c["sl-val"] !== "") ? c["sl-val"] : (msl ? msl.value : "");
+  const active = p.manual_tp_active || p.manual_sl_active;
+  return `<tr class="tpsl-detail" data-sym="${sym}"><td colspan="12">
+    <div class="tpsl-edit">
+      <span class="tag">市价止盈止损</span>
+      <span class="lbl">止盈 TP</span>
+      <select class="tp-type input mini">${opt(tpType, "price", "价格")}${opt(tpType, "pct", "% 百分比")}</select>
+      <input class="tp-val input mini" type="number" step="any" placeholder="价格或%" value="${tpVal}">
+      <span class="lbl">止损 SL</span>
+      <select class="sl-type input mini">${opt(slType, "price", "价格")}${opt(slType, "pct", "% 百分比")}</select>
+      <input class="sl-val input mini" type="number" step="any" placeholder="价格或%" value="${slVal}">
+      <button class="btn btn-ok btn-sm tpsl-apply">应用</button>
+      <button class="btn btn-ghost btn-sm tpsl-clear">清除</button>
+      <span class="hint">触发即市价成交 · 设了覆盖自动 ATR · 清空回退自动 · 价格或百分比均可</span>
+      ${active ? '<span class="hint ok">● 已生效</span>' : ""}
+    </div></td></tr>`;
+}
+
+function toggleTpsl(sym) {
+  tpslOpenSym = (tpslOpenSym === sym) ? null : sym;
+  tpslCache[sym] = {};   // 打开时以服务器值为准
+  refresh();
+}
+
+async function onTpslApply(e) {
+  const tr = e.currentTarget.closest("tr");
+  const sym = tr.getAttribute("data-sym");
+  const tpType = tr.querySelector(".tp-type").value;
+  const tpVal = tr.querySelector(".tp-val").value;
+  const slType = tr.querySelector(".sl-type").value;
+  const slVal = tr.querySelector(".sl-val").value;
+  const tp = tpVal !== "" ? {type: tpType, value: parseFloat(tpVal)} : null;
+  const sl = slVal !== "" ? {type: slType, value: parseFloat(slVal)} : null;
+  if (!tp && !sl) { alert("请至少填写一个 止盈(TP) 或 止损(SL)"); return; }
+  if (tp && isNaN(tp.value)) { alert("TP 数值无效"); return; }
+  if (sl && isNaN(sl.value)) { alert("SL 数值无效"); return; }
+  tpslCache[sym] = {};
+  await postManualTPSL(sym, tp, sl);
+}
+
+async function onTpslClear(e) {
+  const tr = e.currentTarget.closest("tr");
+  const sym = tr.getAttribute("data-sym");
+  tpslCache[sym] = {};
+  await postManualTPSL(sym, null, null);
 }
 
 function opt(sel, val, label) {

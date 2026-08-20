@@ -650,8 +650,8 @@ class TradingEngine:
                 if manual_sl:
                     pos["sl"] = _resolve_manual(entry, sign, manual_sl, False)
                     pos["manual_sl_active"] = True
-                    # 手动止损立即同步到交易所 (行情断流也能止损)
-                    await self._place_exchange_stop(sym, pos, force=True)
+                # 手动止盈+止损一并同步到交易所 (市价单, 行情断流也能成交)
+                await self._sync_exchange_orders(sym, pos)
             # 兜底: 交易所同步/重启恢复的持仓可能没有TP/SL, 用最近ATR补算, 避免裸奔
             # donchian 模式: 只补 SL (ATR止损), 不补 TP (让利润奔跑)
             sig = d["signals"].get(sym) or {}
@@ -668,7 +668,7 @@ class TradingEngine:
                 self.log.info("[%s] 补算止损 SL=%.2f", sym, pos["sl"])
                 self.state.add_event("info", f"🛡 {sym} 补算止损 SL={pos['sl']:.2f}")
                 # 补算后立即把止损下到交易所
-                await self._place_exchange_stop(sym, pos)
+                await self._sync_exchange_orders(sym, pos)
 
             # ---- 移动止损 (trailing stop): 仅 donchian 模式持仓, 随新高/新低锁浮盈 ----
             # 注意: 设了手动止损则跳过移动止损, 否则会被 trailing 改掉用户硬止损
@@ -727,7 +727,7 @@ class TradingEngine:
                         "info",
                         f"🎯 {sym} 移动止损上移 {cur_sl:.2f} → {pos['sl']:.2f} (最高 {pos['high']:.2f})",
                     )
-                    await self._place_exchange_stop(sym, pos, force=True)
+                    await self._sync_exchange_orders(sym, pos)
         else:  # SHORT
             pos["low"] = min(pos.get("low") or pos["entry"], price)
             if atr and atr > 0:
@@ -743,35 +743,76 @@ class TradingEngine:
                         "info",
                         f"🎯 {sym} 移动止损下移 {cur_sl:.2f} → {pos['sl']:.2f} (最低 {pos['low']:.2f})",
                     )
-                    await self._place_exchange_stop(sym, pos, force=True)
+                    await self._sync_exchange_orders(sym, pos)
 
-    async def _place_exchange_stop(self, sym: str, pos: dict, force: bool = False) -> bool:
-        """把止损单挂到交易所 (交易所侧自动执行, 行情断流也能止损)
+    async def _place_with_retry(self, fn, *args, retries: int = 1):
+        """下单, 遇 Binance -4130 (closePosition 市价单并发冲突) 重试一次。
 
-        force=True: 已挂过但止损价变了 (移动止损) → 先撤旧单再挂新价
+        -4130 偶发: 连续挂 TP+SL 两个 closePosition GTE 市价单时, 第一张尚未注册完成,
+        第二张会报 "An open stop or take profit order ... is existing"。稍候重试即可成功。
+        """
+        last = None
+        for i in range(retries + 1):
+            try:
+                return await asyncio.to_thread(fn, *args)
+            except Exception as e:  # noqa: BLE001
+                last = e
+                if "4130" in str(e) and i < retries:
+                    await asyncio.sleep(0.4)
+                    continue
+                raise
+        raise last  # type: ignore[misc]
+
+    async def _sync_exchange_orders(self, sym: str, pos: dict, force: bool = False) -> bool:
+        """把该持仓在交易所应挂的止盈/止损市价单一次性同步好 (cancel_all + 按本地状态重挂)。
+
+        设计目标: 止盈(TP)与止损(SL)由同一函数管理, 避免各自撤单时互相清掉对方。
+        - SL: 只要 pos['sl']>0 就挂 STOP_MARKET (覆盖 手动SL / ATR止损 / 移动止损)
+        - TP: 仅 manual_tp 时挂 TAKE_PROFIT_MARKET (自动策略默认让利润奔跑, 不挂TP)
+        - 仅在「未挂过 / force / 触发价变化」时才撤单重挂, 避免每 tick 撤挂把 -4130 竞态放大;
+          挂单遇 -4130 自动重试一次。
+        触发价均经 round_price 取整, 触发即市价成交 (workingType=MARK_PRICE)。
         """
         if self.cfg["mode"] != "live":
             return False
-        sl = pos.get("sl")
-        if not sl or sl <= 0:
+        sl = pos.get("sl") or 0.0
+        mtp = pos.get("manual_tp")
+        need_sl = sl > 0
+        need_tp = bool(mtp)
+        if not need_sl and not need_tp:
+            # 既无 SL 也无手动 TP: 若之前挂过则清掉
+            if pos.get("orders_placed"):
+                try:
+                    await asyncio.to_thread(self.exchange.cancel_all_orders, sym)
+                except Exception:
+                    pass
+                pos["orders_placed"] = False
             return False
-        if pos.get("stop_placed") and not force:
+        want_tp = round(float(pos["tp"]), 2) if need_tp else None
+        want_sl = round(sl, 2) if need_sl else None
+        # 已挂过且价格未变 → 跳过 (省 API 调用, 也避免 -4130 竞态)
+        if (not force and pos.get("orders_placed")
+                and pos.get("orders_tp") == want_tp and pos.get("orders_sl") == want_sl):
             return True
-        stop_side = "SELL" if pos["side"] == "LONG" else "BUY"
+        side = "SELL" if pos["side"] == "LONG" else "BUY"
         try:
-            if force and pos.get("stop_placed"):
-                # 移动止损: 先撤掉旧止损单, 避免重复/冲突
-                await asyncio.to_thread(self.exchange.cancel_all_orders, sym)
-                pos["stop_placed"] = False
-            await asyncio.to_thread(
-                self.exchange.place_stop_market, sym, stop_side, sl
-            )
-            pos["stop_placed"] = True
-            self.log.info("[%s] 交易所止损单已挂 %s SL=%.2f", sym, stop_side, sl)
-            self.state.add_event("info", f"🎯 {sym} 交易所止损单已挂 ({stop_side} @ {sl:.2f})")
+            # 先撤掉旧单 (同一交易对只允许一对止盈止损市价单, 避免重复/冲突)
+            await asyncio.to_thread(self.exchange.cancel_all_orders, sym)
+            pos["orders_placed"] = False
+            if need_sl:
+                await self._place_with_retry(self.exchange.place_stop_market, sym, side, sl)
+            if need_tp:
+                await self._place_with_retry(self.exchange.place_tp_market, sym, side, pos["tp"])
+            pos["orders_placed"] = True
+            pos["orders_tp"] = want_tp
+            pos["orders_sl"] = want_sl
+            tp_s = f"TP={want_tp}" if need_tp else "-"
+            sl_s = f"SL={want_sl}" if need_sl else "-"
+            self.log.info("[%s] 交易所市价止盈止损已挂 %s (%s / %s)", sym, side, tp_s, sl_s)
+            self.state.add_event("info", f"🎯 {sym} 交易所市价止盈止损已挂 ({side} @ {tp_s} / {sl_s})")
             return True
         except Exception as e:
-            self.log.error("[%s] 挂止损单失败: %s", sym, e)
+            self.log.error("[%s] 同步交易所止盈止损单失败: %s", sym, e)
             return False
 
     async def _ensure_exchange_stops(self):
@@ -783,27 +824,16 @@ class TradingEngine:
             return
         self._last_stop_check = now
         try:
-            open_orders = await asyncio.to_thread(self.exchange.get_open_orders)
-            covered = set()
-            for o in open_orders:
-                otype = o.get("type") or o.get("orderType")
-                ostatus = o.get("status") or o.get("algoStatus")
-                if otype in ("STOP_MARKET",) and ostatus in ("NEW", "WORKING"):
-                    trig = float(o.get("triggerPrice") or o.get("stopPrice", 0))
-                    covered.add((o.get("symbol"), round(trig, 2)))
+            for sym, pos in list(self.state.data["positions"].items()):
+                need_tp = bool(pos.get("manual_tp"))
+                need_sl = (pos.get("sl") or 0) > 0
+                if not (need_tp or need_sl):
+                    continue
+                # 已挂过则跳过; 否则补挂 (重启/撤单后自动恢复 市价止盈止损)
+                if not pos.get("orders_placed"):
+                    await self._sync_exchange_orders(sym, pos)
         except Exception as e:
             self.log.warning("止损单巡检失败: %s", e)
-            return
-        for sym, pos in list(self.state.data["positions"].items()):
-            sl = pos.get("sl")
-            if not sl or sl <= 0:
-                continue
-            # 交易所已有该价格的止损单则跳过
-            if (sym, round(sl, 2)) in covered:
-                pos["stop_placed"] = True
-                continue
-            if not pos.get("stop_placed"):
-                await self._place_exchange_stop(sym, pos)
 
     # ---------------- 策略周期 ----------------
     async def _strategy_cycle(self, symbol: str):

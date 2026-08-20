@@ -167,7 +167,8 @@ def create_app(engine) -> FastAPI:
         """手动设置/清除某持仓的止盈(TP)/止损(SL)。仅作用于当前已开仓。
 
         - tp/sl 为 {type,value} 时覆盖自动 ATR; 为 null 时清除该侧, 回退到自动。
-        - 立即解析为绝对价格写入 pos, 并(在 live 模式)把手动止损挂到交易所。
+        - 立即解析为绝对价格写入 pos, 并(在 live 模式)把 止盈+止损 市价单一并挂到
+          交易所 (TAKE_PROFIT_MARKET / STOP_MARKET, 触发即市价成交, 即使 bot 掉线也生效)。
         """
         d = engine.state.data
         pos = d["positions"].get(body.symbol)
@@ -192,20 +193,15 @@ def create_app(engine) -> FastAPI:
             pos.pop("manual_sl", None)
             pos.pop("manual_sl_active", None)
             pos["sl"] = None
-            if engine.cfg["mode"] == "live":
-                try:
-                    await asyncio.to_thread(engine.exchange.cancel_all_orders, body.symbol)
-                    pos["stop_placed"] = False
-                except Exception:
-                    pass
         else:
             pos["manual_sl"] = body.sl
             pos["sl"] = _resolve_manual(entry, sign, body.sl, False)
-            if engine.cfg["mode"] == "live":
-                try:
-                    await engine._place_exchange_stop(body.symbol, pos, force=True)
-                except Exception as e:
-                    engine.log.warning("手动止损下单失败: %s", e)
+        # 立即把 止盈+止损 市价单同步到交易所 (live 模式): 撤旧挂新, 触发即市价成交
+        if engine.cfg["mode"] == "live":
+            try:
+                await engine._sync_exchange_orders(body.symbol, pos, force=True)
+            except Exception as e:
+                engine.log.warning("手动止盈止损下单失败: %s", e)
         engine.state.save()
         engine.state.add_event(
             "info",

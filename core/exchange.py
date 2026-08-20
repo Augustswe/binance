@@ -310,6 +310,25 @@ class BinanceFutures:
         )
         return self._signed("POST", "/fapi/v1/algoOrder", **params)
 
+    def place_tp_market(self, symbol: str, side: str, take_price: float,
+                       quantity: float | None = None, reduce_only: bool = True) -> dict:
+        """向交易所挂 TAKE_PROFIT_MARKET 止盈单 (Algo Order API, 触发即市价成交)
+
+        与 place_stop_market 对称: 仅 type 改为 TAKE_PROFIT_MARKET。
+        side 同样与持仓相反 (多单挂 SELL, 空单挂 BUY), closePosition=true 整仓平仓。
+        用于"手动止盈"挂到交易所, 即使 bot 掉线也能在触发价市价止盈。
+        """
+        params = dict(
+            algoType="CONDITIONAL",
+            symbol=symbol,
+            side=side,
+            type="TAKE_PROFIT_MARKET",
+            triggerPrice=self.round_price(symbol, take_price),
+            workingType="MARK_PRICE",
+            closePosition="true",
+        )
+        return self._signed("POST", "/fapi/v1/algoOrder", **params)
+
     def get_open_orders(self, symbol: str | None = None) -> list[dict]:
         """查询未成交挂单 (含算法止损单)"""
         params = {} if symbol is None else {"symbol": symbol}
