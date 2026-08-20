@@ -7,10 +7,11 @@ mode: live
 network: testnet
 
 # 主网分级解锁 (保护真实资金): 测试网跑满对应天数后主网开放并提高限额
+# ⚠️ 请勿为提前解锁而回填过去的 since —— 这是保护你真实资金的安全护栏, 移除/篡改风险自负
 # since:      测试网开跑基准时间(epoch秒); 留空则首次启动自动记录; 可填过去时间计入已运行天数
 # custom_limit: 跑满90天(t3)后可自定义主网总持仓限额(USDT); 0 = 未设置(默认用 risk.max_total_position_notional)
 mainnet:
-  since: 0
+  since: null
   custom_limit: 0
 
 # 策略模式: multi = 多策略自适应评分 | donchian = Donchian通道突破趋势跟踪(长周期, 4年回测5币全正)
