@@ -48,6 +48,29 @@ class TradingEngine:
         learned_w = load_mode_weights()
         if learned_w:
             self.modes.update_weights(learned_w)
+        # ML 门禁 / 选择器: 加载离线训练好的模型 (缺失则安全降级为关闭, 不影响原逻辑)
+        mlcfg = cfg.get("ml_filter", {})
+        self.ml_enabled = bool(mlcfg.get("enabled", False))
+        self.ml_gate = bool(mlcfg.get("gate", True)) and self.ml_enabled
+        self.ml_selector = bool(mlcfg.get("selector", True)) and self.ml_enabled
+        self.ml_threshold = float(mlcfg.get("threshold", 0.55))
+        self.ml_model_file = mlcfg.get("model_file", "data/ml_filter.pkl")
+        self.ml = None
+        self._ml_regime = {}
+        if self.ml_enabled:
+            try:
+                from core.ml_filter import MLFilter
+                self.ml = MLFilter.load(self.ml_model_file)
+                if self.ml is None:
+                    self.log.warning("ml_filter 已启用但模型文件缺失(%s), 降级关闭, 请先跑 ml_train.py",
+                                     self.ml_model_file)
+                    self.ml_enabled = self.ml_gate = self.ml_selector = False
+                else:
+                    self.log.info("ML 门禁/选择器已加载: gate=%s selector=%s threshold=%.2f",
+                                  self.ml_gate, self.ml_selector, self.ml_threshold)
+            except Exception as e:
+                self.log.warning("ml_filter 加载失败: %s", e)
+                self.ml_enabled = self.ml_gate = self.ml_selector = False
         # 自动学习进化器: 加载上次学习到的最优组合, 启动后立即学一轮, 之后每天学
         self.timeframe = cfg["timeframe"]   # 先取配置默认, 学习器组合会覆盖
         lcfg = cfg.get("learner", {})
@@ -768,8 +791,21 @@ class TradingEngine:
             if sig is None:
                 continue
             d["signals"][f"{mode}:{symbol}"] = sig.to_dict()
+            # ---- ML 选择器: 震荡市抑制 Donchian 开仓 (出场管理不受影响) ----
+            if mode == "donchian" and self.ml_selector and self.ml:
+                self._ml_regime[symbol] = self.ml.regime(klines)
+                if self._ml_regime[symbol] == "range" and not pos:
+                    continue
+            # ---- ML 门禁: 低盈利概率的 Donchian 信号不开仓 ----
+            if mode == "donchian" and sig.action and self.ml_gate and self.ml and not pos:
+                feats = self.ml.features_for_gate(klines, sig, self.donchian)
+                prob = self.ml.gate_prob(feats) if feats is not None else 1.0
+                if feats is None or prob < self.ml_threshold:
+                    self.log.info("🚪 ML门禁拦截 %s %s (prob=%.2f)", symbol, sig.action, prob)
+                    self.state.add_event("ml", f"🚪 门禁拦截 {symbol} {sig.action} prob={prob:.2f}")
+                    continue
             if not pos:
-                # 无持仓: 开仓 (信号触发且通过风控)
+                # 无持仓: 开仓 (信号触发且通过风控/ML门禁)
                 if sig.action == "LONG":
                     await self._try_open_mode(mode, symbol, "LONG", mark, sig)
                 elif sig.action == "SHORT":

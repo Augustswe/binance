@@ -116,6 +116,40 @@ def create_app(engine) -> FastAPI:
             ],
         }
 
+    @app.get("/api/ml_filter")
+    async def api_ml_filter():
+        """ML 门禁/选择器状态: 是否启用、模型是否已加载、各币当前 regime、walk-forward 指标"""
+        e = engine
+        return {
+            "enabled": e.ml_enabled,
+            "gate": e.ml_gate,
+            "selector": e.ml_selector,
+            "threshold": e.ml_threshold,
+            "model_loaded": e.ml is not None,
+            "model_file": e.ml_model_file,
+            "regime": getattr(e, "_ml_regime", {}),
+            "metrics": (e.ml.metrics if e.ml else None),
+        }
+
+    @app.post("/api/ml_filter/train")
+    async def api_ml_filter_train():
+        """离线训练 ML 门禁/选择器模型 (拉主网历史K线, walk-forward 评估, 保存)"""
+        import asyncio
+        from core.ml_filter import MLFilter
+        try:
+            model = await asyncio.to_thread(
+                MLFilter.train, engine.cfg,
+                int(engine.cfg.get("ml_filter", {}).get("days", 365)),
+            )
+            model.save(engine.ml_model_file)
+            engine.ml = model
+            engine.ml_enabled = True
+            engine.ml_gate = bool(engine.cfg.get("ml_filter", {}).get("gate", True))
+            engine.ml_selector = bool(engine.cfg.get("ml_filter", {}).get("selector", True))
+            return {"ok": True, "threshold": model.threshold, "metrics": model.metrics}
+        except Exception as ex:
+            return {"ok": False, "error": str(ex)[:200]}
+
     @app.post("/api/control")
     async def api_control(body: ControlBody):
         return engine.control(body.action)

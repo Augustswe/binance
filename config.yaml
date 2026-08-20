@@ -143,6 +143,20 @@ learner:
   days: 90            # 评估窗口: 最近90天
   interval_hours: 24  # 学习周期: 每24小时进化一次 (启动时立即学一轮)
 
+# ML 门禁 / 选择器 (纯 numpy, 零依赖): 给 Donchian 信号当"门禁"过滤劣质单, 当"选择器"判趋势/震荡
+# 模型需先离线训练: python ml_train.py  → 生成 data/ml_filter.pkl
+# enabled=true 即生效 (前提是模型文件存在; 缺失会自动降级为关闭, 不影响原逻辑)
+ml_filter:
+  # 选择器已在 walk-forward 验证通过 (regime AUC≈0.86, 预测趋势命中率≈64%,  firing≈40%, 非退化) → 已开启;
+  # 门禁 AUC≈0.52(≈随机) 无区分力 → 保持关闭。regime_threshold 存于模型文件内(≈0.021)。
+  enabled: true        # 总开关
+  gate: false          # 门禁: 当前 AUC≈0.52 无区分力, 暂不启用
+  selector: true       # 选择器: 震荡市(regime=range)抑制 Donchian 开仓
+  threshold: 0.55      # 门禁概率阈值 (门禁关闭时无效)
+  days: 365            # 训练回看天数
+  retrain_hours: 168   # 建议每周重训一次 (当前需手动跑 ml_train.py)
+  model_file: data/ml_filter.pkl
+
 # 日志
 logging:
   level: INFO
