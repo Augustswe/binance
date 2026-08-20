@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Binance 测试网量化仪表盘</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◈</span>
+    <h1>Binance 测试网 · 自动量化交易</h1>
+  </div>
+  <div class="topbar-right">
+    <span id="heartbeat" class="badge badge-ok" title="主循环最近一次数据更新时间">心跳 --</span>
+    <span id="mode-badge" class="badge">--</span>
+    <span id="status-badge" class="badge badge-ok">连接中…</span>
+    <button id="btn-pause" class="btn btn-warn">暂停</button>
+    <button id="btn-reset" class="btn btn-ghost">重置今日</button>
+  </div>
+</header>
+
+<main>
+  <!-- 概览卡片 -->
+  <section class="cards" id="cards">
+    <div class="card"><div class="label">总权益</div><div class="value mono" id="c-equity">--</div></div>
+    <div class="card"><div class="label">今日盈亏</div><div class="value mono" id="c-daypnl">--</div></div>
+    <div class="card"><div class="label">未实现盈亏</div><div class="value mono" id="c-upnl">--</div></div>
+    <div class="card"><div class="label">持仓敞口</div><div class="value mono" id="c-exposure">--</div></div>
+    <div class="card"><div class="label">累计交易 / 胜率</div><div class="value mono" id="c-trades">--</div></div>
+    <div class="card"><div class="label">累计已实现盈亏</div><div class="value mono" id="c-realized">--</div></div>
+    <div class="card"><div class="label">手续费</div><div class="value mono" id="c-fees">--</div></div>
+  </section>
+
+  <!-- 权益曲线 -->
+  <section class="panel">
+    <div class="panel-title">权益曲线 <span class="hint" id="chart-hint"></span></div>
+    <canvas id="equity-chart" height="220"></canvas>
+  </section>
+
+  <!-- 行情与持仓 -->
+  <section class="panel">
+    <div class="panel-title">行情 &amp; 持仓</div>
+    <div class="table-wrap">
+      <table id="symbols-table">
+        <thead>
+          <tr>
+            <th>交易对</th><th>最新价</th><th>24h</th><th>市场状态</th><th>综合评分</th>
+            <th>主导策略</th><th>杠杆</th><th>持仓</th><th>入场价</th><th>未实现盈亏</th><th>TP / SL</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 策略信号 -->
+  <section class="panel">
+    <div class="panel-title">策略信号 (Donchian 通道突破 · 信号越强倍率越高)</div>
+    <div class="table-wrap">
+      <table id="signals-table">
+        <thead>
+          <tr>
+            <th>交易对</th><th>状态</th><th>方向</th><th>综合评分</th><th>ATR%</th><th>信号强度</th><th>杠杆</th><th>更新时间</th><th></th><th></th><th></th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 操作日志 -->
+  <section class="panel">
+    <div class="panel-title">📋 操作日志 <span class="hint">系统每一步动作的时间线（心跳每 5 秒更新，日志自动刷新）</span></div>
+    <div class="log-list" id="log-list">
+      <div class="empty">等待日志…</div>
+    </div>
+  </section>
+
+  <!-- 自动学习历史 -->
+  <section class="panel">
+    <div class="panel-title">🤖 自动学习历史 <span class="hint">每天用最近90天真实行情回测策略池，自动切换最优组合</span></div>
+    <div class="learner-head" id="learner-head">加载中…</div>
+    <div class="table-wrap learner-scroll">
+      <table id="learner-table">
+        <thead>
+          <tr>
+            <th>轮次时间</th><th>最优组合</th><th>评分</th><th>第2名</th><th>第3名</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 成交记录 -->
+  <section class="panel">
+    <div class="panel-title">成交记录 (下单 / 卖出 · 交易所逐笔成交)</div>
+    <div class="table-wrap trades-scroll">
+      <table id="trades-table">
+        <thead>
+          <tr>
+            <th>时间</th><th>类型</th><th>交易对</th><th>方向</th><th>数量</th><th>价格</th>
+            <th>手续费</th><th>盈亏</th><th>原因</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot" id="foot">--</footer>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

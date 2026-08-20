@@ -1,0 +1,124 @@
+# ============================================================
+# Binance U本位合约测试网 自动量化交易系统 配置
+# ============================================================
+
+# 交易模式: paper = 模拟下单(无需API Key), live = 真实测试网下单(需要API Key)
+mode: live
+
+# 策略模式: multi = 多策略自适应评分 | donchian = Donchian通道突破趋势跟踪(长周期, 4年回测5币全正)
+strategy_mode: donchian
+
+# K线周期: 1m / 5m / 15m / 1h / 1d
+timeframe: "1d"
+
+# Donchian 通道突破参数 (海龟风格)
+donchian:
+  entry_n: 55       # 突破前55根K线最高/最低 → 入场
+  exit_n: 20        # 反向突破前20根 → 出场(让利润奔跑)
+  sl_atr: 2.5       # 止损 = 入场 ∓ 2.5 × ATR
+  # 动态杠杆: 按突破深度(相对ATR)自动调倍率 - 强信号高倍开单, 弱信号低倍试错
+  leverage:
+    min: 1           # 弱信号最低杠杆 (试探仓)
+    max: 5           # 强信号最高杠杆 (重仓)
+
+# 行情/持仓监控间隔 (秒)
+poll_interval: 5
+
+# 指标计算用K线数量
+kline_limit: 300
+
+# 交易对
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - BNBUSDT
+  - SOLUSDT
+  - XRPUSDT
+
+# 杠杆策略: auto = 按波动率自动调整(1x-5x), fixed = 固定杠杆
+leverage:
+  mode: auto
+  min: 1
+  max: 5
+  fixed: 3
+
+# 风控 (激进模式)
+risk:
+  max_single_order_notional: 1000   # 单笔下单名义价值上限 (USDT) - Donchian长周期用大仓位
+  max_total_position_notional: 2000 # 全部持仓名义价值上限 (USDT)
+  margin_per_position: 200          # 单笔保证金预算 (USDT) × 动态杠杆 = 实际名义仓位
+  daily_loss_stop: 0.30             # 日亏损 30% 熔断停机
+  max_positions: 5                  # 最多同时持有仓位数
+  cooldown_minutes: 60              # 每个币种平仓后的冷静期(分钟) - 长周期用较长冷静期
+
+# 策略参数 (引擎会按市场状态自动分配权重, 可在此开关)
+strategies:
+  grid:
+    enabled: true
+    levels: 10          # 网格层数
+    grid_pct: 0.02      # 每格间距 2%
+  ma_cross:
+    enabled: true
+    fast: 8
+    slow: 21
+  rsi:
+    enabled: true
+    period: 14
+    oversold: 30
+    overbought: 70
+  bollinger:
+    enabled: true
+    period: 20
+    std: 2.0
+
+# 信号阈值
+signal:
+  open_threshold: 0.15     # |综合评分| 超过此值开仓 (激进模式)
+  close_threshold: 0.0     # 0=禁用"信号消失"平仓, 持仓只靠止盈止损离场 (修复被频繁晃下车)
+
+# 仓位管理 (ATR 止盈止损)
+position:
+  tp_atr: 3.9              # 止盈 = 入场价 ± 3.9 * ATR
+  sl_atr: 2.7              # 止损 = 入场价 ∓ 2.7 * ATR
+  min_tp_pct: 0.0025       # 止盈最小距离 0.25% (至少覆盖2.5倍手续费, 防止止盈被手续费吃掉)
+  min_sl_pct: 0.0015       # 止损最小距离 0.15%
+
+# 手续费 (USDT-M 合约默认)
+fees:
+  maker: 0.0002
+  taker: 0.0005
+
+# paper 模式初始资金 (USDT)
+paper_initial_balance: 10000
+
+# Web 仪表盘
+web:
+  host: "127.0.0.1"
+  port: 8090
+
+# Telegram 通知 (需要 Bot Token + Chat ID, 留空则禁用)
+# 获取: @BotFather 创建机器人得 token; @userinfobot 查询 chat_id
+telegram:
+  enabled: true
+  bot_token: ""
+  chat_id: ""
+
+# AI 自动调参 (仅 multi 策略模式适用; donchian 模式禁用)
+tuning:
+  enabled: false
+  interval_hours: 6
+  symbol: BTCUSDT
+  timeframe: "5m"
+  bars: 2000          # 优化使用的K线数量
+  trials: 20          # 每轮尝试的参数组合数
+
+# 自动学习进化器 (仅 donchian 模式): 每天用最近行情回测策略池, 自动应用最优组合
+learner:
+  enabled: true
+  days: 90            # 评估窗口: 最近90天
+  interval_hours: 24  # 学习周期: 每24小时进化一次 (启动时立即学一轮)
+
+# 日志
+logging:
+  level: INFO
+  file: logs/quant.log
