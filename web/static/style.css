@@ -158,6 +158,8 @@ body.modal-open { overflow: hidden; }
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px;
 }
 .input:focus { outline: none; border-color: var(--blue); }
+.input.mini { flex: 0 0 auto; min-width: 0; width: 92px; padding: 4px 7px; font-size: 12px; display: inline-block; }
+.btn-sm { padding: 4px 10px; font-size: 12px; margin-left: 4px; }
 .modal-hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .modal-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .chip {

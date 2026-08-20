@@ -1,7 +1,11 @@
 {
   "weights": {
     "donchian": 3.0,
-    "multi": 0.3
+    "multi": 1.0,
+    "grid": 1.0,
+    "ma_cross": 1.0,
+    "rsi": 1.0,
+    "bollinger": 1.0
   },
-  "learned_at": 1787212551.76774
+  "learned_at": 1787243873.1739361
 }

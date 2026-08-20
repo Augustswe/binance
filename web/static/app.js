@@ -161,6 +161,7 @@ async function refresh() {
 
   // 行情持仓表
   renderSymbols(s);
+  renderManualTPSL(s);
   renderSignals(s);
   renderTrades(s);
   renderModes(s);
@@ -279,6 +280,105 @@ function setActiveSigTab(mode) {
   document.querySelectorAll(".sig-tab-panel").forEach(el => {
     el.classList.toggle("active", el.dataset.mode === mode);
   });
+}
+
+function renderManualTPSL(s) {
+  const tbody = document.querySelector("#manual-tpsl-table tbody");
+  const empty = document.getElementById("manual-tpsl-empty");
+  if (!tbody) return;
+  // 正在编辑本表时不打断 (保留输入焦点与内容)
+  if (document.activeElement && document.activeElement.closest &&
+      document.activeElement.closest("#manual-tpsl-table")) return;
+  const positions = s.positions || [];
+  if (positions.length === 0) {
+    tbody.innerHTML = "";
+    if (empty) empty.style.display = "block";
+    return;
+  }
+  if (empty) empty.style.display = "none";
+  // 缓存当前输入值, 轮询刷新时不覆盖用户正在填的内容
+  const cache = {};
+  tbody.querySelectorAll("tr[data-sym]").forEach(tr => {
+    const sym = tr.getAttribute("data-sym");
+    cache[sym] = {
+      tpType: tr.querySelector(".tp-type") && tr.querySelector(".tp-type").value,
+      tpVal: tr.querySelector(".tp-val") && tr.querySelector(".tp-val").value,
+      slType: tr.querySelector(".sl-type") && tr.querySelector(".sl-type").value,
+      slVal: tr.querySelector(".sl-val") && tr.querySelector(".sl-val").value,
+    };
+  });
+  tbody.innerHTML = "";
+  const f2 = x => (x == null || isNaN(x)) ? "--" : Number(x).toLocaleString(undefined, {maximumFractionDigits: 2});
+  for (const p of positions) {
+    const sym = p.symbol;
+    const side = p.side === "LONG" ? "做多 ▲" : "做空 ▼";
+    const mark = (p.mark != null) ? p.mark : (p.entry || "--");
+    const mtp = p.manual_tp || null;
+    const msl = p.manual_sl || null;
+    const c = cache[sym] || {};
+    const tpType = c.tpType || (mtp ? mtp.type : "price");
+    const tpVal = (c.tpVal !== undefined && c.tpVal !== "") ? c.tpVal : (mtp ? mtp.value : "");
+    const slType = c.slType || (msl ? msl.type : "price");
+    const slVal = (c.slVal !== undefined && c.slVal !== "") ? c.slVal : (msl ? msl.value : "");
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-sym", sym);
+    tr.innerHTML = `
+      <td class="mono">${sym}</td>
+      <td>${side}</td>
+      <td class="mono">${f2(p.entry)}</td>
+      <td class="mono" id="mtp-mark-${sym}">${f2(mark)}</td>
+      <td>
+        <select class="tp-type input mini">${opt(tpType, "price", "价格")}${opt(tpType, "pct", "百分比%")}</select>
+        <input class="tp-val input mini" type="number" step="any" placeholder="TP" value="${tpVal}">
+      </td>
+      <td>
+        <select class="sl-type input mini">${opt(slType, "price", "价格")}${opt(slType, "pct", "百分比%")}</select>
+        <input class="sl-val input mini" type="number" step="any" placeholder="SL" value="${slVal}">
+      </td>
+      <td>
+        <button class="btn btn-ok btn-sm" data-act="apply">应用</button>
+        <button class="btn btn-ghost btn-sm" data-act="clear">清除</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+  // 事件委托: 应用 / 清除
+  tbody.querySelectorAll("button[data-act]").forEach(btn => {
+    btn.onclick = async () => {
+      const tr = btn.closest("tr");
+      const sym = tr.getAttribute("data-sym");
+      const act = btn.getAttribute("data-act");
+      if (act === "clear") { await postManualTPSL(sym, null, null); return; }
+      const tpType = tr.querySelector(".tp-type").value;
+      const tpVal = tr.querySelector(".tp-val").value;
+      const slType = tr.querySelector(".sl-type").value;
+      const slVal = tr.querySelector(".sl-val").value;
+      const tp = tpVal !== "" ? {type: tpType, value: parseFloat(tpVal)} : null;
+      const sl = slVal !== "" ? {type: slType, value: parseFloat(slVal)} : null;
+      if (!tp && !sl) { alert("请至少填写一个 止盈(TP) 或 止损(SL)"); return; }
+      if (tp && isNaN(tp.value)) { alert("TP 数值无效"); return; }
+      if (sl && isNaN(sl.value)) { alert("SL 数值无效"); return; }
+      await postManualTPSL(sym, tp, sl);
+    };
+  });
+}
+
+function opt(sel, val, label) {
+  return `<option value="${val}" ${sel === val ? "selected" : ""}>${label}</option>`;
+}
+
+async function postManualTPSL(sym, tp, sl) {
+  try {
+    const res = await fetch("/api/manual_tp_sl", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({symbol: sym, tp, sl}),
+    });
+    const j = await res.json();
+    if (!j.ok) { alert("设置失败: " + (j.error || "未知错误")); }
+    else { refresh(); }
+  } catch (e) {
+    alert("请求失败: " + e);
+  }
 }
 
 function renderSignalsTabs(usedModes) {

@@ -120,6 +120,6 @@ class LiveExecution(BaseExecution):
             return None
 
     @staticmethod
-    async def _to_thread(fn, *args):
+    async def _to_thread(fn, *args, **kwargs):
         import asyncio
-        return await asyncio.to_thread(fn, *args)
+        return await asyncio.to_thread(fn, *args, **kwargs)

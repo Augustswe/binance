@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from core.autostart import (disable as autostart_disable,
                             enable as autostart_enable,
                             status as autostart_status)
+from engine.trader import _resolve_manual
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -49,6 +50,12 @@ class MainnetQuotaBody(BaseModel):
 
 class AutostartBody(BaseModel):
     enabled: bool = False
+
+
+class ManualTPSLBody(BaseModel):
+    symbol: str
+    tp: dict | None = None   # {"type":"price"|"pct","value":<number>} 或 None=清除
+    sl: dict | None = None
 
 
 def create_app(engine) -> FastAPI:
@@ -153,6 +160,60 @@ def create_app(engine) -> FastAPI:
     @app.post("/api/control")
     async def api_control(body: ControlBody):
         return engine.control(body.action)
+
+    # ---------------- 手动止盈止损 ----------------
+    @app.post("/api/manual_tp_sl")
+    async def api_manual_tp_sl(body: ManualTPSLBody):
+        """手动设置/清除某持仓的止盈(TP)/止损(SL)。仅作用于当前已开仓。
+
+        - tp/sl 为 {type,value} 时覆盖自动 ATR; 为 null 时清除该侧, 回退到自动。
+        - 立即解析为绝对价格写入 pos, 并(在 live 模式)把手动止损挂到交易所。
+        """
+        d = engine.state.data
+        pos = d["positions"].get(body.symbol)
+        if not pos:
+            return {"ok": False, "error": f"当前无 {body.symbol} 持仓"}
+        for name, spec in (("tp", body.tp), ("sl", body.sl)):
+            if spec is not None:
+                if spec.get("type") not in ("price", "pct") or not isinstance(spec.get("value"), (int, float)):
+                    return {"ok": False, "error": f"{name} 格式错误: 需 {{type:price|pct, value:数字}}"}
+        sign = 1.0 if pos["side"] == "LONG" else -1.0
+        entry = pos.get("entry") or 0.0
+        # 止盈 TP
+        if body.tp is None:
+            pos.pop("manual_tp", None)
+            pos.pop("manual_tp_active", None)
+            pos["tp"] = None
+        else:
+            pos["manual_tp"] = body.tp
+            pos["tp"] = _resolve_manual(entry, sign, body.tp, True)
+        # 止损 SL
+        if body.sl is None:
+            pos.pop("manual_sl", None)
+            pos.pop("manual_sl_active", None)
+            pos["sl"] = None
+            if engine.cfg["mode"] == "live":
+                try:
+                    await asyncio.to_thread(engine.exchange.cancel_all_orders, body.symbol)
+                    pos["stop_placed"] = False
+                except Exception:
+                    pass
+        else:
+            pos["manual_sl"] = body.sl
+            pos["sl"] = _resolve_manual(entry, sign, body.sl, False)
+            if engine.cfg["mode"] == "live":
+                try:
+                    await engine._place_exchange_stop(body.symbol, pos, force=True)
+                except Exception as e:
+                    engine.log.warning("手动止损下单失败: %s", e)
+        engine.state.save()
+        engine.state.add_event(
+            "info",
+            f"🛡 {body.symbol} 手动止盈止损已更新: TP={pos.get('tp')} SL={pos.get('sl')}",
+        )
+        return {"ok": True, "symbol": body.symbol,
+                "tp": pos.get("tp"), "sl": pos.get("sl"),
+                "manual_tp": pos.get("manual_tp"), "manual_sl": pos.get("manual_sl")}
 
     # ---------------- 设置面板 ----------------
     @app.get("/api/settings")

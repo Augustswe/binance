@@ -29,6 +29,25 @@ MAINNET_TIER_DAYS = (30, 60, 90)
 MAINNET_TIER_CAPS = (500.0, 1000.0)
 
 
+def _resolve_manual(entry: float, sign: float, spec: dict, is_tp: bool) -> float:
+    """把手动止盈止损规格解析成绝对价格, 供 _check_tp_sl / API 共用。
+
+    spec: {"type": "price"|"pct", "value": <number>}
+    sign = +1 (LONG) / -1 (SHORT)
+    TP 永远在入场价顺向(盈利方向), SL 逆向(亏损方向)。
+      price: 直接用 value
+      pct  : 相对入场价的百分比(value 为正数, 如 5 表示 +5%)
+    """
+    t = (spec or {}).get("type")
+    v = float((spec or {}).get("value", 0) or 0)
+    if t == "price":
+        return float(v)
+    # pct
+    if is_tp:
+        return entry * (1.0 + sign * v / 100.0)
+    return entry * (1.0 - sign * v / 100.0)
+
+
 class TradingEngine:
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -619,6 +638,20 @@ class TradingEngine:
             p = d["mark_prices"].get(sym)
             if not p or p <= 0:
                 continue
+            # ---- 手动止盈止损: 优先覆盖自动 ATR, 清空后回退自动 ----
+            manual_tp = pos.get("manual_tp")
+            manual_sl = pos.get("manual_sl")
+            if manual_tp or manual_sl:
+                entry = pos.get("entry") or 0.0
+                sign = 1.0 if pos["side"] == "LONG" else -1.0
+                if manual_tp:
+                    pos["tp"] = _resolve_manual(entry, sign, manual_tp, True)
+                    pos["manual_tp_active"] = True
+                if manual_sl:
+                    pos["sl"] = _resolve_manual(entry, sign, manual_sl, False)
+                    pos["manual_sl_active"] = True
+                    # 手动止损立即同步到交易所 (行情断流也能止损)
+                    await self._place_exchange_stop(sym, pos, force=True)
             # 兜底: 交易所同步/重启恢复的持仓可能没有TP/SL, 用最近ATR补算, 避免裸奔
             # donchian 模式: 只补 SL (ATR止损), 不补 TP (让利润奔跑)
             sig = d["signals"].get(sym) or {}
@@ -638,25 +671,30 @@ class TradingEngine:
                 await self._place_exchange_stop(sym, pos)
 
             # ---- 移动止损 (trailing stop): 仅 donchian 模式持仓, 随新高/新低锁浮盈 ----
-            if pos.get("mode") == "donchian":
+            # 注意: 设了手动止损则跳过移动止损, 否则会被 trailing 改掉用户硬止损
+            if pos.get("mode") == "donchian" and not pos.get("manual_sl"):
                 await self._update_trailing_stop(sym, pos, p, atr)
 
             if pos["side"] == "LONG":
                 if pos.get("tp") and p >= pos["tp"]:
-                    trade = await self.execution.close_position(sym, p, "止盈TP")
+                    reason = "手动止盈TP" if pos.get("manual_tp_active") else "止盈TP"
+                    trade = await self.execution.close_position(sym, p, reason)
                     if trade:
                         await self._notify_close(trade)
                 elif pos.get("sl") and p <= pos["sl"]:
-                    trade = await self.execution.close_position(sym, p, "止损SL")
+                    reason = "手动止损SL" if pos.get("manual_sl_active") else "止损SL"
+                    trade = await self.execution.close_position(sym, p, reason)
                     if trade:
                         await self._notify_close(trade)
             else:
                 if pos.get("tp") and p <= pos["tp"]:
-                    trade = await self.execution.close_position(sym, p, "止盈TP")
+                    reason = "手动止盈TP" if pos.get("manual_tp_active") else "止盈TP"
+                    trade = await self.execution.close_position(sym, p, reason)
                     if trade:
                         await self._notify_close(trade)
                 elif pos.get("sl") and p >= pos["sl"]:
-                    trade = await self.execution.close_position(sym, p, "止损SL")
+                    reason = "手动止损SL" if pos.get("manual_sl_active") else "止损SL"
+                    trade = await self.execution.close_position(sym, p, reason)
                     if trade:
                         await self._notify_close(trade)
 

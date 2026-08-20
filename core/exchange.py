@@ -238,6 +238,22 @@ class BinanceFutures:
         factor = 10 ** decimals
         return int(qty * factor) / factor
 
+    def price_precision(self, symbol: str) -> int:
+        """返回该交易对价格小数位数 (取自 PRICE_FILTER.tickSize)"""
+        info = self.get_exchange_info()
+        for s in info.get("symbols", []):
+            if s["symbol"] == symbol:
+                for f in s.get("filters", []):
+                    if f["filterType"] == "PRICE_FILTER":
+                        ts = float(f.get("tickSize", "0.01"))
+                        s2 = f"{ts:.10f}".rstrip("0")
+                        return len(s2.split(".")[1]) if "." in s2 else 0
+        return 2
+
+    def round_price(self, symbol: str, price: float) -> float:
+        """按 tickSize 四舍五入价格小数位 (交易所下单前置, 避免精度超限报错)"""
+        return round(float(price), self.price_precision(symbol))
+
     # ---------------- 签名账户/交易接口 ----------------
     # 注意: 测试网只支持 v2 账户接口 (v1 返回 404)
     def get_account(self) -> dict[str, Any]:
@@ -288,7 +304,7 @@ class BinanceFutures:
             symbol=symbol,
             side=side,
             type="STOP_MARKET",
-            triggerPrice=stop_price,
+            triggerPrice=self.round_price(symbol, stop_price),
             workingType="MARK_PRICE",
             closePosition="true",
         )

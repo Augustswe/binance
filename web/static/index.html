@@ -231,6 +231,23 @@
     </div>
   </section>
 
+  <!-- 手动止盈止损 -->
+  <section class="panel">
+    <div class="panel-title">🛡 手动止盈止损 <span class="hint">仅作用于当前已开仓 · 设了手动价覆盖自动 ATR · 清空回退自动 · 价格或百分比均可</span></div>
+    <div class="table-wrap">
+      <table id="manual-tpsl-table">
+        <thead>
+          <tr>
+            <th>交易对</th><th>方向</th><th>入场价</th><th>最新价</th>
+            <th>止盈 (TP)</th><th>止损 (SL)</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="manual-tpsl-empty" class="empty" style="display:none">当前无持仓</div>
+  </section>
+
   <!-- 策略信号 -->
   <section class="panel">
     <div class="panel-title">策略信号 <span class="hint">每个启用模式一个 Tab · 各自独立分析 (模式:币种) · 每5分钟刷新</span></div>
