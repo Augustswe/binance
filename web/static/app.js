@@ -220,45 +220,135 @@ function stratName(n) {
   return map[n] || n || "--";
 }
 
-function renderSignals(s) {
-  const tb = document.querySelector("#signals-table tbody");
-  // 按 模式:币种 的 key 排序展示 (先模式后币种)
-  const keys = Object.keys(s.signals).sort();
-  if (!keys.length) {
-    tb.innerHTML = `<tr><td colspan="9" class="empty">等待首个K线分析…</td></tr>`;
+// 策略信号模块 - 按启用模式动态生成 Tab
+// 每个 Tab 独立显示该模式的所有交易对信号
+let sigActiveTab = null;
+const SIG_PANEL_HTML = `
+  <div class="table-wrap">
+    <table class="sig-tbl">
+      <thead><tr>
+        <th>交易对</th><th>状态</th><th>方向</th><th>评分</th><th>ATR%</th><th>强度</th><th>杠杆</th><th>距通道</th><th>最近分析</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>`;
+
+function ensureSigPanel(mode) {
+  let panel = document.getElementById("sig-panel-" + mode);
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "sig-panel-" + mode;
+    panel.className = "sig-tab-panel";
+    panel.dataset.mode = mode;
+    panel.innerHTML = SIG_PANEL_HTML;
+    $("sig-tab-panels").appendChild(panel);
+  }
+  return panel;
+}
+
+function setActiveSigTab(mode) {
+  sigActiveTab = mode;
+  document.querySelectorAll(".sig-tab").forEach(el => {
+    el.classList.toggle("active", el.dataset.tab === mode);
+  });
+  document.querySelectorAll(".sig-tab-panel").forEach(el => {
+    el.classList.toggle("active", el.dataset.mode === mode);
+  });
+}
+
+function renderSignalsTabs(usedModes) {
+  const tabs = $("sig-tabs");
+  if (!tabs) return;
+  // 模式顺序: 已启用 > 已出现信号; 其余兜底
+  const enabled = enabledModes.filter(m => MODE_LABELS[m]);
+  const seen = usedModes.filter(m => MODE_LABELS[m] && !enabled.includes(m));
+  const list = [...enabled, ...seen];
+  if (!list.length) {
+    tabs.innerHTML = `<span class="hint" style="padding:12px">尚未启用任何策略模式 · 打开 ⚙️ 设置 勾选</span>`;
+    $("sig-tab-panels").innerHTML = `<div class="empty">暂无信号数据</div>`;
     return;
   }
-  let html = "";
-  for (const key of keys) {
+  tabs.innerHTML = list.map((m, i) => {
+    return `<div class="sig-tab ${(!sigActiveTab || sigActiveTab === m) && i === 0 ? "active" : ""}" data-tab="${m}">
+      ${MODE_LABELS[m] || m}<span class="tab-count" data-count="${m}">0</span>
+    </div>`;
+  }).join("");
+  // 为每个模式建面板
+  list.forEach(m => ensureSigPanel(m));
+  // 清理掉之前多余的面板
+  document.querySelectorAll(".sig-tab-panel").forEach(el => {
+    if (!list.includes(el.dataset.mode)) el.remove();
+  });
+  // 点击切换
+  tabs.querySelectorAll(".sig-tab").forEach(el => {
+    el.addEventListener("click", () => setActiveSigTab(el.dataset.tab));
+  });
+  // 默认激活
+  if (!sigActiveTab || !list.includes(sigActiveTab)) setActiveSigTab(list[0]);
+}
+
+function renderSignals(s) {
+  const used = new Set();
+  // 收集每个模式下的信号 key
+  const byMode = {};
+  Object.keys(s.signals).sort().forEach(key => {
     const g = s.signals[key];
-    if (!g) continue;
-    const [mode, sym] = key.includes(":") ? key.split(":") : [g.mode || "donchian", key];
-    const mlabel = MODE_LABELS[mode] || mode;
-    // 距通道 (donchian 特有)
-    const price = s.prices[sym];
-    let dist = "--";
-    if (mode === "donchian" && price > 0 && g.up_level > 0 && g.dn_level > 0) {
-      const toUp = (g.up_level - price) / price * 100;
-      const toDn = (price - g.dn_level) / price * 100;
-      dist = `上${sign(-toUp)}${fmt(Math.abs(toUp), 2)}% / 下${sign(-toDn)}${fmt(Math.abs(toDn), 2)}%`;
-    } else if (mode !== "donchian" && price > 0) {
-      const r = g.regime === "trend_up" ? "↑趋势" : g.regime === "trend_down" ? "↓趋势" : "震荡";
-      dist = r;
+    if (!g) return;
+    let mode, sym;
+    if (key.includes(":")) {
+      [mode, sym] = key.split(":");
+    } else {
+      mode = g.mode || "donchian";
+      sym = key;
     }
-    const waiting = g.action === "等待" || g.action == null;
-    html += `<tr>
-      <td><b>${mlabel}</b> <span class="mono" style="color:var(--muted)">${sym}</span></td>
-      <td>${regimePill(g.regime)}</td>
-      <td class="mono">${waiting ? '<span class="pill pill-none">等待</span>' : (g.action === "LONG" ? '<span class="pill pill-long">▲做多</span>' : '<span class="pill pill-short">▼做空</span>')}</td>
-      <td>${scoreBar(g.combined != null ? g.combined : g.score)}</td>
-      <td class="mono">${fmt(g.atr_pct, 3)}%</td>
-      <td class="mono">${fmt(g.strength, 2)}</td>
-      <td class="mono ${g.leverage > 1 ? "pos" : ""}">${g.leverage}x</td>
-      <td class="mono">${dist}</td>
-      <td class="mono">${fmtTime(g.ts)}</td>
-    </tr>`;
-  }
-  tb.innerHTML = html;
+    if (!MODE_LABELS[mode]) return;
+    used.add(mode);
+    if (!byMode[mode]) byMode[mode] = [];
+    byMode[mode].push({ key, g, sym });
+  });
+  renderSignalsTabs([...used]);
+
+  // 渲染每个模式面板
+  const modesToRender = [...used].sort();
+  modesToRender.forEach(mode => {
+    const panel = document.getElementById("sig-panel-" + mode);
+    if (!panel) return;
+    const tb = panel.querySelector("tbody");
+    const rows = byMode[mode] || [];
+    // tab 计数
+    const cntEl = document.querySelector(`.sig-tab[data-tab="${mode}"] .tab-count`);
+    if (cntEl) cntEl.textContent = rows.length;
+    if (!rows.length) {
+      tb.innerHTML = `<tr><td colspan="9" class="empty">该模式暂无信号 · 等待 K 线分析…</td></tr>`;
+      return;
+    }
+    let html = "";
+    for (const { g, sym, key } of rows) {
+      const waiting = g.action === "等待" || g.action == null;
+      const price = s.prices[sym];
+      let dist = "--";
+      if (mode === "donchian" && price > 0 && g.up_level > 0 && g.dn_level > 0) {
+        const toUp = (g.up_level - price) / price * 100;
+        const toDn = (price - g.dn_level) / price * 100;
+        dist = `上${sign(-toUp)}${fmt(Math.abs(toUp), 2)}% / 下${sign(-toDn)}${fmt(Math.abs(toDn), 2)}%`;
+      } else if (price > 0) {
+        const r = g.regime === "trend_up" ? "↑趋势" : g.regime === "trend_down" ? "↓趋势" : "震荡";
+        dist = r;
+      }
+      html += `<tr>
+        <td><b>${sym}</b><span class="mono" style="color:var(--muted);font-size:11px;margin-left:6px">${key}</span></td>
+        <td>${regimePill(g.regime)}</td>
+        <td class="mono">${waiting ? '<span class="pill pill-none">等待</span>' : (g.action === "LONG" ? '<span class="pill pill-long">▲做多</span>' : '<span class="pill pill-short">▼做空</span>')}</td>
+        <td>${scoreBar(g.combined != null ? g.combined : g.score)}</td>
+        <td class="mono">${fmt(g.atr_pct, 3)}%</td>
+        <td class="mono">${fmt(g.strength, 2)}</td>
+        <td class="mono ${g.leverage > 1 ? "pos" : ""}">${g.leverage}x</td>
+        <td class="mono">${dist}</td>
+        <td class="mono">${fmtTime(g.ts)}</td>
+      </tr>`;
+    }
+    tb.innerHTML = html;
+  });
 }
 
 function renderTrades(s) {
@@ -516,29 +606,32 @@ document.addEventListener("DOMContentLoaded", () => {
       modeWeights = settingsData.mode_weights || {};
       renderModeSettings();
       renderSymbolList();
+      renderRiskSettings();
     } catch (e) {
       setMsg("❌ 加载设置失败: " + e, true);
     }
   }
 
-  // 模式勾选 UI
-  function renderModeSettings() {
-    const box = $("set-modes");
-    if (!box) return;
-    const all = settingsData.all_modes || [];
-    box.innerHTML = all.map(m => {
-      const on = (settingsData.enabled_modes || []).includes(m);
-      const w = (settingsData.mode_weights || {})[m];
-      const wTxt = w != null ? ` <span class="mono" style="color:var(--muted);font-size:11px">权重${fmt(w,2)}x</span>` : "";
-      return `<label class="mode-check ${on ? "on" : ""}">
-        <input type="checkbox" data-mode="${m}" ${on ? "checked" : ""}>
-        ${MODE_LABELS[m] || m}${wTxt}
-      </label>`;
-    }).join("");
-    box.querySelectorAll("input[type=checkbox]").forEach(cb => {
-      cb.addEventListener("change", saveModes);
-    });
-  }
+// 模式勾选 UI - 紧凑卡片网格
+function renderModeSettings() {
+  const box = $("set-modes");
+  if (!box) return;
+  const all = settingsData.all_modes || [];
+  box.innerHTML = all.map(m => {
+    const on = (settingsData.enabled_modes || []).includes(m);
+    const w = (settingsData.mode_weights || {})[m];
+    const wTxt = w != null ? fmt(w, 2) + "x" : "1.00x";
+    return `<label class="mode-card ${on ? "on" : ""}" data-mode="${m}">
+      <input type="checkbox" data-mode="${m}" ${on ? "checked" : ""}>
+      <span class="mc-name">${MODE_LABELS[m] || m}</span>
+      <span class="mc-weight">权重 ${wTxt}</span>
+    </label>`;
+  }).join("");
+  // 用 label 上的 click 触发, 避免重复; checkbox 由 label 包装, change 仍有效
+  box.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    cb.addEventListener("change", saveModes);
+  });
+}
 
   async function saveModes() {
     const modes = [...document.querySelectorAll("#set-modes input:checked")].map(x => x.dataset.mode);
@@ -641,6 +734,58 @@ document.addEventListener("DOMContentLoaded", () => {
     setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
     loadSettings();
   });
+
+  // ---------------- 风控与敞口 ----------------
+  function renderRiskSettings() {
+    const r = settingsData.risk || (cfg && cfg.risk) || {};
+    const l = settingsData.leverage || (cfg && cfg.leverage) || {};
+    const setVal = (id, v) => { const el = $(id); if (el && v != null) el.value = v; };
+    setVal("risk-total", r.max_total_position_notional);
+    setVal("risk-single", r.max_single_order_notional);
+    setVal("risk-margin", r.margin_per_position);
+    setVal("risk-positions", r.max_positions);
+    setVal("risk-dd", r.daily_loss_stop != null ? Math.round(r.daily_loss_stop * 100) : "");
+    setVal("risk-cooldown", r.cooldown_minutes);
+    setVal("risk-lev-mode", l.mode);
+    setVal("risk-lev-min", l.min);
+    setVal("risk-lev-max", l.max);
+    setVal("risk-lev-fixed", l.fixed);
+  }
+
+  async function saveRisk() {
+    const num = (id) => { const v = parseFloat($(id).value); return isNaN(v) ? null : v; };
+    const risk = {
+      max_total_position_notional: num("risk-total"),
+      max_single_order_notional: num("risk-single"),
+      margin_per_position: num("risk-margin"),
+      max_positions: num("risk-positions"),
+      daily_loss_stop: num("risk-dd") != null ? num("risk-dd") / 100 : null,
+      cooldown_minutes: num("risk-cooldown"),
+    };
+    Object.keys(risk).forEach(k => { if (risk[k] == null) delete risk[k]; });
+    const leverage = {
+      mode: $("risk-lev-mode").value,
+      min: num("risk-lev-min"),
+      max: num("risk-lev-max"),
+      fixed: num("risk-lev-fixed"),
+    };
+    Object.keys(leverage).forEach(k => { if (leverage[k] == null) delete leverage[k]; });
+    if (!Object.keys(risk).length && !Object.keys(leverage).length) {
+      setMsg("⚠ 没有可保存的值", true); return;
+    }
+    setMsg("保存风控中…");
+    const res = await fetch("/api/settings/risk", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ risk, leverage }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
+    if (res.ok) {
+      settingsData.risk = res.risk;
+      settingsData.leverage = res.leverage;
+      renderRiskSettings();
+    }
+  }
+  $("btn-save-risk").addEventListener("click", saveRisk);
 
   window.addEventListener("resize", () => {
     if (lastSnapshot) drawChart(lastSnapshot.equity_history, lastSnapshot.day_start_equity);

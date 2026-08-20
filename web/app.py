@@ -28,6 +28,11 @@ class ModesBody(BaseModel):
     modes: list[str]
 
 
+class RiskBody(BaseModel):
+    risk: dict = {}
+    leverage: dict = {}
+
+
 def create_app(engine) -> FastAPI:
     app = FastAPI(title="Binance 测试网量化仪表盘", docs_url=None, redoc_url=None)
 
@@ -114,6 +119,8 @@ def create_app(engine) -> FastAPI:
             "api": engine.api_status(),
             "candidates": [c["symbol"] for c in candidates],
             "has_positions": list(engine.state.data["positions"].keys()),
+            "risk": dict(engine.cfg["risk"]),
+            "leverage": dict(engine.cfg["leverage"]),
         }
 
     @app.post("/api/settings/modes")
@@ -157,6 +164,76 @@ def create_app(engine) -> FastAPI:
     @app.post("/api/settings/symbols")
     async def api_settings_symbols(body: SymbolsBody):
         return engine.update_symbols(body.symbols)
+
+    @app.post("/api/settings/risk")
+    async def api_settings_risk(body: RiskBody):
+        """保存风控与敞口参数 (写 config.yaml + 热更新引擎, 无需重启)
+
+        风控读取路径: _try_open_mode 读 engine.cfg["risk"], check_open 读
+        RiskManager.risk (与 cfg["risk"] 同一字典引用)。原地修改该字典即可让运行中
+        的开仓预算与风控校验立即生效。
+        """
+        # 类型矫正: 数值字段按配置语义转换
+        def to_int(v):
+            try:
+                return int(round(float(v)))
+            except (TypeError, ValueError):
+                return None
+
+        def to_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        risk_out: dict = {}
+        raw_risk = body.risk or {}
+        int_keys = ("max_single_order_notional", "max_total_position_notional",
+                    "margin_per_position", "max_positions", "cooldown_minutes")
+        for k in int_keys:
+            if k in raw_risk:
+                v = to_int(raw_risk[k])
+                if v is None or v < 0:
+                    return {"ok": False, "msg": f"❌ 风控项 {k} 需为非负整数"}
+                risk_out[k] = v
+        if "daily_loss_stop" in raw_risk:
+            v = to_float(raw_risk["daily_loss_stop"])
+            if v is None or v <= 0 or v > 1:
+                return {"ok": False, "msg": "❌ 日亏熔断需为 0~1 的小数 (如 0.30)"}
+            risk_out["daily_loss_stop"] = v
+
+        lev_out: dict = {}
+        raw_lev = body.leverage or {}
+        if "mode" in raw_lev and raw_lev["mode"] in ("auto", "fixed"):
+            lev_out["mode"] = raw_lev["mode"]
+        for k in ("min", "max", "fixed"):
+            if k in raw_lev:
+                v = to_int(raw_lev[k])
+                if v is None or v < 1 or v > 20:
+                    return {"ok": False, "msg": f"❌ 杠杆 {k} 需为 1~20 的整数"}
+                lev_out[k] = v
+        if "min" in lev_out and "max" in lev_out and lev_out["min"] > lev_out["max"]:
+            return {"ok": False, "msg": "❌ 杠杆 min 不能大于 max"}
+
+        try:
+            from core.config import update_config_risk
+            update_config_risk(risk_out, lev_out)
+        except Exception as e:
+            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {e}"}
+
+        # 热更新: 原地修改 cfg 字典 (RiskManager 持有同一引用)
+        for k, v in risk_out.items():
+            engine.cfg["risk"][k] = v
+        for k, v in lev_out.items():
+            engine.cfg["leverage"][k] = v
+
+        engine.state.add_event("info", "🛡 风控/敞口参数已更新并热生效")
+        return {
+            "ok": True,
+            "msg": "✅ 风控与敞口参数已保存并热更新",
+            "risk": dict(engine.cfg["risk"]),
+            "leverage": dict(engine.cfg["leverage"]),
+        }
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

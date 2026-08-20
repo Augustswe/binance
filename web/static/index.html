@@ -54,10 +54,10 @@
       <hr class="modal-hr">
       <!-- 策略模式 -->
       <div class="modal-sec">
-        <div class="modal-sec-title">🎯 策略模式 (多选, 各自独立开仓统计)</div>
-        <div id="set-modes" class="modal-chips" style="flex-direction:column;align-items:flex-start;gap:8px"></div>
+        <div class="modal-sec-title">🎯 策略模式 <span class="hint">多选 · 各模式独立开仓统计 · 系统按实盘表现自动分配资金权重</span></div>
+        <div id="set-modes" class="modal-mode-grid"></div>
         <div class="modal-row" style="margin-top:8px">
-          <span class="hint">系统按各模式实盘表现自动分配资金权重；同币种先到先得</span>
+          <span class="hint">同币种先到先得 · 新增策略后, 下方"策略信号"模块会自动新增对应 Tab</span>
         </div>
       </div>
       <hr class="modal-hr">
@@ -75,6 +75,54 @@
         <div id="set-symbol-list" class="modal-chips"></div>
         <div class="modal-row" style="margin-top:8px">
           <span class="hint">⚠️ 有持仓的交易对不可移除, 需先平仓</span>
+        </div>
+      </div>
+      <hr class="modal-hr">
+      <!-- 风控与敞口 -->
+      <div class="modal-sec">
+        <div class="modal-sec-title">🛡 风控与敞口 <span class="hint">实时生效 · 保存即热更新并落盘 config.yaml</span></div>
+        <div class="risk-grid">
+          <div class="risk-field">
+            <label>总持仓上限 (U)</label>
+            <input type="number" id="risk-total" class="input" min="0" step="50">
+          </div>
+          <div class="risk-field">
+            <label>单笔上限 (U)</label>
+            <input type="number" id="risk-single" class="input" min="0" step="50">
+          </div>
+          <div class="risk-field">
+            <label>单笔保证金 (U)</label>
+            <input type="number" id="risk-margin" class="input" min="0" step="10">
+          </div>
+          <div class="risk-field">
+            <label>最大持仓数</label>
+            <input type="number" id="risk-positions" class="input" min="1" step="1">
+          </div>
+          <div class="risk-field">
+            <label>日亏熔断 (%)</label>
+            <input type="number" id="risk-dd" class="input" min="1" max="100" step="1">
+          </div>
+          <div class="risk-field">
+            <label>冷静期 (分钟)</label>
+            <input type="number" id="risk-cooldown" class="input" min="0" step="5">
+          </div>
+        </div>
+        <div class="modal-row risk-lev-row">
+          <span class="modal-label" style="width:auto">杠杆</span>
+          <select id="risk-lev-mode" class="input risk-select">
+            <option value="auto">auto 自动</option>
+            <option value="fixed">fixed 固定</option>
+          </select>
+          <span class="modal-label" style="width:auto">min</span>
+          <input type="number" id="risk-lev-min" class="input risk-num" min="1" step="1">
+          <span class="modal-label" style="width:auto">max</span>
+          <input type="number" id="risk-lev-max" class="input risk-num" min="1" step="1">
+          <span class="modal-label" style="width:auto">fixed</span>
+          <input type="number" id="risk-lev-fixed" class="input risk-num" min="1" step="1">
+        </div>
+        <div class="modal-row" style="margin-top:10px">
+          <button class="btn btn-ok" id="btn-save-risk">保存风控</button>
+          <span class="hint">日亏熔断填百分比 (如 30 = 30%); 其余单位 USDT · 改完立即生效</span>
         </div>
       </div>
       <div id="set-msg" class="modal-msg"></div>
@@ -118,17 +166,9 @@
 
   <!-- 策略信号 -->
   <section class="panel">
-    <div class="panel-title">策略信号 <span class="hint">各模式独立分析 (模式:币种) · 每5分钟刷新</span></div>
-    <div class="table-wrap">
-      <table id="signals-table">
-        <thead>
-          <tr>
-            <th>模式 / 交易对</th><th>状态</th><th>方向</th><th>评分</th><th>ATR%</th><th>强度</th><th>杠杆</th><th>距通道</th><th>最近分析</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <div class="panel-title">策略信号 <span class="hint">每个启用模式一个 Tab · 各自独立分析 (模式:币种) · 每5分钟刷新</span></div>
+    <div class="sig-tabs" id="sig-tabs"></div>
+    <div id="sig-tab-panels"></div>
   </section>
 
   <!-- 操作日志 -->

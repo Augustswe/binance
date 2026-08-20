@@ -79,6 +79,48 @@ def update_config_modes(modes: list[str]) -> None:
     path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def _replace_block_values(text: str, block_key: str, values: dict) -> str:
+    """在 config.yaml 某顶层块内, 按 key 原地替换标量值 (保留注释/顺序/其它 key)
+
+    block_key 为顶层键 (如 "risk" / "leverage")。缩进的子项 `  key: value` 命中 values 时
+    被替换; 不在 values 中的子项、注释、空行原样保留。遇到下一个顶层键即退出该块。
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    in_block = False
+    for line in lines:
+        if re.match(rf"^{block_key}:\s*$", line):
+            in_block = True
+            out.append(line)
+            continue
+        if in_block:
+            # 下一个顶层键 (非缩进且非注释) → 退出块
+            if re.match(r"^\S", line) and not line.startswith("#"):
+                in_block = False
+                out.append(line)
+                continue
+            km = re.match(r"^(\s+)(\w[\w_]*):\s*(.*)$", line)
+            if km and km.group(2) in values:
+                out.append(f"{km.group(1)}{km.group(2)}: {values[km.group(2)]}")
+                continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def update_config_risk(risk: dict, leverage: dict) -> None:
+    """更新 config.yaml 的 risk 与 leverage 块 (文本级替换, 保留注释与顺序)
+
+    Web 设置面板"风控与敞口"保存时调用, 重启后依然生效。
+    """
+    path = BASE_DIR / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    if risk:
+        text = _replace_block_values(text, "risk", risk)
+    if leverage:
+        text = _replace_block_values(text, "leverage", leverage)
+    path.write_text(text + "\n", encoding="utf-8")
+
+
 def update_env_api(key: str, secret: str) -> None:
     """更新 .env 中的测试网 API Key/Secret (保留其他配置与注释)"""
     env_path = BASE_DIR / ".env"

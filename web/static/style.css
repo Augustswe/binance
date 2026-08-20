@@ -87,7 +87,7 @@ tr:hover td { background: rgba(255,255,255,.02); }
 .pill-up { background: var(--green-bg); color: var(--green); }
 .pill-down { background: var(--red-bg); color: var(--red); }
 .pill-none { background: var(--panel2); color: var(--muted); }
-.score-bar { position: relative; display: inline-block; width: 90px; height: 6px; border-radius: 3px; background: var(--panel2); vertical-align: middle; margin-left: 6px; }
+.score-bar { position: relative; display: inline-block; width: 90px; height: 6px; border-radius: 3px; background: var(--panel2); vertical-align: middle; margin-left: 6px; overflow: hidden; }
 .score-fill { position: absolute; top: 0; height: 100%; border-radius: 3px; }
 canvas#equity-chart { width: 100%; display: block; }
 .foot { color: var(--muted); font-size: 12px; text-align: center; padding: 8px 0; }
@@ -155,6 +155,15 @@ canvas#equity-chart { width: 100%; display: block; }
 .chip-add:hover { background: var(--green-bg); }
 .chip-locked { opacity: .5; cursor: not-allowed; }
 .modal-msg { margin-top: 10px; font-size: 13px; min-height: 18px; word-break: break-all; }
+
+/* 风控与敞口面板 */
+.risk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.risk-field { display: flex; flex-direction: column; gap: 4px; }
+.risk-field label { font-size: 12px; color: var(--muted); }
+.risk-field .input { min-width: 0; width: 100%; }
+.risk-lev-row { align-items: center; }
+.risk-select { min-width: 110px; flex: 0 0 auto; }
+.risk-num { min-width: 64px; width: 64px; flex: 0 0 auto; }
 .btn-ok { background: var(--green); color: #fff; border: none; }
 .btn-ok:hover { filter: brightness(1.1); }
 .mode-check {
@@ -164,3 +173,62 @@ canvas#equity-chart { width: 100%; display: block; }
 }
 .mode-check:hover { border-color: var(--blue); }
 .mode-check.on { border-color: var(--green); background: var(--green-bg); color: var(--green); }
+
+/* 策略模式选择器: 紧凑 2 列卡片网格 */
+.modal-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.mode-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 10px;
+  cursor: pointer; user-select: none;
+  transition: border-color .15s, background .15s;
+}
+.mode-card:hover { border-color: var(--blue); }
+.mode-card.on { border-color: var(--green); background: var(--green-bg); }
+.mode-card input { width: 16px; height: 16px; accent-color: var(--green); cursor: pointer; flex-shrink: 0; }
+.mode-card .mc-name { font-size: 13px; font-weight: 600; flex: 1; }
+.mode-card .mc-weight {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.mode-card.on .mc-weight { color: var(--green); border-color: var(--green); }
+
+/* 策略信号 Tabs */
+.sig-tabs {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.sig-tab {
+  padding: 8px 14px; cursor: pointer; user-select: none;
+  font-size: 13px; font-weight: 500;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  position: relative; top: 1px;
+  background: transparent;
+  transition: color .15s, background .15s;
+}
+.sig-tab:hover { color: var(--text); background: var(--panel2); }
+.sig-tab.active {
+  color: var(--green);
+  background: var(--panel);
+  border-color: var(--border);
+  border-bottom-color: var(--panel);
+}
+.sig-tab .tab-count {
+  display: inline-block; margin-left: 6px;
+  font-size: 11px; padding: 1px 7px; border-radius: 8px;
+  background: var(--panel2); color: var(--muted);
+}
+.sig-tab.active .tab-count { background: var(--green-bg); color: var(--green); }
+.sig-tab-panel { display: none; }
+.sig-tab-panel.active { display: block; }
+.sig-tab-panel .empty { padding: 28px 12px; }
+.sig-tbl { width: 100%; border-collapse: collapse; }
