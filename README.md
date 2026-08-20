@@ -122,6 +122,21 @@ TRADING_MODE=paper   # 先模拟
 
 打开浏览器访问 **http://127.0.0.1:8090** 查看仪表盘。
 
+### 🖱️ 一键启动 / 关闭脚本（Mac & Windows）
+
+项目根目录提供跨平台的一键脚本，**不用记命令**：自动安装依赖（仅首次）、启动服务、并自动打开浏览器仪表盘；关闭脚本则停止后台服务。
+
+| 系统 | 启动 | 关闭 |
+|---|---|---|
+| macOS / Linux | 终端运行 `./start.sh` | 终端运行 `./stop.sh` |
+| Windows | 双击 `start.bat` | 双击 `stop.bat` |
+
+- **start**：若没有虚拟环境会自动建 `.venv` 并 `pip install -r requirements.txt`（仅首次较慢）；服务已在运行时只打开浏览器；启动后访问 http://127.0.0.1:8090
+- **stop**：按端口 8090 找到进程并结束（Windows 只结束该端口的 python，不影响其它 python 程序）
+- 日志输出：`logs/console.log`
+
+> 💡 想让服务**开机 / 登录自动运行**，打开仪表盘 ⚙️ 设置 → 🍎 开机自启 开关即可（macOS 用 launchd，Windows 用「启动」文件夹）。
+
 > 🌐 **网络要求**：测试网 `testnet.binancefuture.com` 国内网络不可直连，需要代理（Clash 等）且代理节点可用。自动学习回测走主网 `fapi.binance.com`（公开数据，无需密钥）。
 
 ### 4. 切换到真实测试网下单（live）
@@ -272,6 +287,8 @@ cd binance-quant/deploy
 ```
 binance-quant/
 ├── run.py                 # 入口: 启动交易引擎 + Web 服务
+├── start.sh / stop.sh     # 一键启动 / 关闭 (macOS / Linux)
+├── start.bat / stop.bat   # 一键启动 / 关闭 (Windows)
 ├── config.yaml            # 全部配置
 ├── .env                   # API 密钥 (git 忽略, 从 .env.example 复制)
 ├── backtest.py / tune.py  # 回测 / 参数优化工具

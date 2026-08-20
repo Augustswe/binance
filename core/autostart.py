@@ -1,14 +1,16 @@
-"""开机自启管理 (macOS launchd LaunchAgent)
+"""开机自启管理 (跨平台)
 
 供 Web 设置面板「开机自启」开关调用:
-  - enable()   写入 ~/Library/LaunchAgents/<label>.plist 并 launchctl load
-  - disable()  launchctl unload 并删除 plist
+  - macOS: 生成 ~/Library/LaunchAgents/<label>.plist 并用 launchctl 注册
+  - Windows: 在用户「启动」文件夹写入调用 start.bat 的批处理, 登录时自动运行
+  - enable()   开启开机自启
+  - disable()  关闭开机自启
   - status()   返回 supported / installed / enabled
 
-仅 macOS 支持; 其它平台返回 supported=False 并提示。
-plist 使用当前运行的 venv 解释器与项目根目录动态生成, 因此克隆到任何用户目录都能用
-(不依赖写死的绝对路径)。RunAtLoad=true 实现登录/开机自启; KeepAlive=false 避免在
-端口被占用(如手动实例仍在跑)时崩溃重启循环 —— 当前手动运行的实例不受影响。
+仅 macOS / Windows 支持; 其它平台返回 supported=False 并提示。
+plist / 启动项均使用项目根目录下的 start 脚本 (可移植, 克隆到任何用户目录都能用,
+不依赖写死的绝对路径)。RunAtLoad=true (mac) 实现登录/开机自启; KeepAlive=false
+避免在端口被占用(如手动实例仍在跑)时崩溃重启循环 —— 当前手动运行的实例不受影响。
 """
 from __future__ import annotations
 
@@ -20,6 +22,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LABEL = "com.binance-quant.trading"
 PLIST_NAME = f"{LABEL}.plist"
+WIN_AUTOSTART_BAT = "binance-quant-autostart.bat"
+
+
+# ---------------- 平台探测 ----------------
+def is_supported() -> bool:
+    return sys.platform == "darwin" or sys.platform == "win32"
 
 
 def _gui_domain() -> str:
@@ -42,10 +50,13 @@ def plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / PLIST_NAME
 
 
-def is_supported() -> bool:
-    return sys.platform == "darwin"
+def _startup_folder_win() -> Path:
+    appdata = os.environ.get("APPDATA")
+    base = Path(appdata) if appdata else (Path.home() / "AppData" / "Roaming")
+    return base / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 
 
+# ---------------- macOS (launchd) ----------------
 def _generate_plist_xml() -> str:
     py = sys.executable
     run_py = ROOT / "run.py"
@@ -83,9 +94,7 @@ def _generate_plist_xml() -> str:
 '''
 
 
-def enable() -> dict:
-    if not is_supported():
-        return {"ok": False, "msg": "❌ 当前系统不支持开机自启 (仅 macOS 支持 launchd)"}
+def _enable_mac() -> dict:
     path = plist_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,9 +115,7 @@ def enable() -> dict:
     return {"ok": True, "msg": "✅ 开机自启已开启 (下次登录/开机自动启动)"}
 
 
-def disable() -> dict:
-    if not is_supported():
-        return {"ok": False, "msg": "❌ 当前系统不支持开机自启 (仅 macOS 支持 launchd)"}
+def _disable_mac() -> dict:
     path = plist_path()
     try:
         # 优先 bootout (对应 bootstrap), 失败回退 unload
@@ -122,10 +129,66 @@ def disable() -> dict:
     return {"ok": True, "msg": "✅ 开机自启已关闭"}
 
 
-def status() -> dict:
-    supported = is_supported()
+def _status_mac() -> dict:
     path = plist_path()
     installed = path.exists()
-    loaded = bool(supported and installed and _loaded())
-    return {"supported": supported, "installed": installed, "enabled": loaded,
+    loaded = bool(installed and _loaded())
+    return {"supported": True, "installed": installed, "enabled": loaded,
             "label": LABEL, "path": str(path)}
+
+
+# ---------------- Windows (启动文件夹) ----------------
+def _enable_win() -> dict:
+    folder = _startup_folder_win()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        bat = folder / WIN_AUTOSTART_BAT
+        # 调用项目根目录的 start.bat (自动启动服务 + 浏览器); 路径带空格也无妨 (已加引号)
+        content = f'@echo off\n"{ROOT / "start.bat"}"\n'
+        bat.write_text(content, encoding="utf-8")
+    except Exception as e:
+        return {"ok": False, "msg": f"❌ 写入开机启动项失败: {e}"}
+    return {"ok": True, "msg": "✅ 开机自启已开启 (下次登录自动启动)"}
+
+
+def _disable_win() -> dict:
+    bat = _startup_folder_win() / WIN_AUTOSTART_BAT
+    try:
+        if bat.exists():
+            bat.unlink()
+    except Exception as e:
+        return {"ok": False, "msg": f"❌ 移除开机启动项失败: {e}"}
+    return {"ok": True, "msg": "✅ 开机自启已关闭"}
+
+
+def _status_win() -> dict:
+    bat = _startup_folder_win() / WIN_AUTOSTART_BAT
+    installed = bat.exists()
+    return {"supported": True, "installed": installed, "enabled": installed,
+            "label": LABEL, "path": str(bat)}
+
+
+# ---------------- 统一入口 ----------------
+def enable() -> dict:
+    if not is_supported():
+        return {"ok": False, "msg": "❌ 当前系统不支持开机自启 (仅 macOS / Windows 支持)"}
+    if sys.platform == "win32":
+        return _enable_win()
+    return _enable_mac()
+
+
+def disable() -> dict:
+    if not is_supported():
+        return {"ok": False, "msg": "❌ 当前系统不支持开机自启 (仅 macOS / Windows 支持)"}
+    if sys.platform == "win32":
+        return _disable_win()
+    return _disable_mac()
+
+
+def status() -> dict:
+    if not is_supported():
+        return {"supported": False, "installed": False, "enabled": False,
+                "label": LABEL, "path": ""}
+    if sys.platform == "win32":
+        return _status_win()
+    return _status_mac()
