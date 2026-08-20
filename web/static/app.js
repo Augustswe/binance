@@ -189,7 +189,7 @@ function renderSymbols(s) {
       <td>${pos ? posPill(pos) : '<span class="pill pill-none">空仓</span>'}</td>
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
       <td class="mono ${cls(pos ? pos.upnl : 0)}">${pos ? sign(pos.upnl) + fmt(pos.upnl) : "--"}</td>
-      <td class="mono">${pos ? fmtPrice(pos.tp) + " / " + fmtPrice(pos.sl) : "--"}</td>
+      <td class="mono">${pos ? tpSlCell(pos) : "--"}</td>
     </tr>`;
   }
   tb.innerHTML = html || `<tr><td colspan="11" class="empty">暂无数据</td></tr>`;
@@ -197,6 +197,13 @@ function renderSymbols(s) {
 
 function posPill(p) {
   return `<span class="pill ${p.side === "LONG" ? "pill-long" : "pill-short"}">${p.side === "LONG" ? "多" : "空"} ${p.qty} @${p.leverage}x</span>`;
+}
+
+// TP/SL 列: donchian 模式无固定TP, 显示"移动止损"替代 0.00
+function tpSlCell(p) {
+  if (p.tp && p.tp > 0) return fmtPrice(p.tp) + " / " + fmtPrice(p.sl);
+  const lock = p.sl > 0 ? `移动止损 ${fmtPrice(p.sl)}` : "--";
+  return `<span title="海龟策略: 不设固定止盈, 用移动止损锁利 + 通道反向出场">∞ / ${lock}</span>`;
 }
 
 function stratName(n) {
