@@ -1,16 +1,88 @@
 # Binance 测试网自动量化交易系统
 
-基于 **Binance U本位合约测试网**（testnet.binancefuture.com）的多策略自动量化交易系统，支持：
+基于 **Binance U本位合约测试网**（testnet.binancefuture.com）的自动量化交易系统，采用 **Donchian 通道突破趋势跟踪**（海龟风格），带自动学习进化、交易所级止损、Web 仪表盘。
 
-- 🔄 **多策略引擎**：网格 / 均线交叉 / RSI / 布林带，按市场状态（震荡/上涨/下跌）自动分配权重
-- 🎚️ **动态杠杆**：根据波动率自动调整 1x–5x（波动大降杠杆、波动小升杠杆）
-- 🛡️ **激进风控**：单笔≤200U、总持仓≤2000U、日亏损 30% 熔断停机、ATR 止盈止损、开仓冷静期
-- 📊 **本地 Web 仪表盘**：实时行情、持仓、权益曲线、策略信号、成交记录
-- 💻 **双模式**：`paper` 模拟下单（无需 Key 即可全流程跑通）/ `live` 真实测试网下单
+> ⚠️ **只用于测试网虚拟资金**，不碰真实资金。全部代码在本地运行，不消耗任何 API token。
 
 ---
 
-## 快速开始
+## ✨ 功能总览
+
+- 📈 **Donchian 通道突破趋势跟踪**：突破前 N 根 K 线最高/最低开仓，ATR 动态止损，反向突破通道出场（让利润奔跑）
+- 🧬 **自动学习进化**：策略池 18 个组合（2h~1d 周期 × 参数），每天用最近 90 天**主网真实行情**回测评分，自动切换最优组合
+- 🎚️ **动态杠杆 1x–5x**：突破越深（信号越强）杠杆越高、仓位越大；弱信号低倍小仓试错
+- 🛡️ **交易所侧止损**：止损单挂在交易所（Algo Order API），本地断网/行情断流也能自动止损
+- 🔒 **激进风控**：单笔 ≤1000U、总持仓 ≤2000U、日亏损 30% 熔断、平仓冷静期
+- 📊 **本地 Web 仪表盘**：实时行情、持仓、权益曲线、信号强度/杠杆、下单/卖出成交流水、自动学习历史、操作日志
+- 🕐 **24h 守护**：launchd 开机自启 + 崩溃自动重启（或 `deploy/manual.sh` 手动守护）
+
+---
+
+## 📁 在哪里配置什么文件
+
+| 文件 | 作用 | 必须配置? |
+|---|---|---|
+| `.env` | API 密钥、模式、Telegram（从 `.env.example` 复制） | ✅ live 模式必须 |
+| `config.yaml` | 交易对、策略参数、风控、杠杆、周期 | ✅ 按需修改 |
+| `data/learner_state.json` | 自动学习结果（自动生成，勿手改） | ❌ 自动 |
+| `data/state.json` | 运行状态（自动生成，勿手改） | ❌ 自动 |
+
+### 1️⃣ 环境配置：`.env`（复制自 `.env.example`）
+
+```bash
+cp .env.example .env
+```
+
+```ini
+# 交易模式: paper = 模拟下单(无需Key) / live = 真实测试网下单(需要Key)
+TRADING_MODE=live
+
+# 测试网 API Key / Secret (获取: https://testnet.binance.vision 用 GitHub 登录创建)
+BINANCE_TESTNET_API_KEY=你的Key
+BINANCE_TESTNET_API_SECRET=你的Secret
+
+# Telegram 通知 (可选, 留空则不推送)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+```
+
+> 🔑 **注意**：`.env` 已在 `.gitignore` 中，永远不会提交到 git。
+
+### 2️⃣ 策略配置：`config.yaml`（关键项）
+
+```yaml
+mode: live              # paper = 模拟 / live = 测试网真实下单
+strategy_mode: donchian # 当前唯一策略: 通道突破趋势跟踪
+
+# Donchian 参数 (自动学习器会按评分自动覆盖 entry/exit/sl_atr)
+donchian:
+  entry_n: 55           # 突破前55根K线最高/最低 → 入场
+  exit_n: 20            # 反向突破前20根 → 出场
+  sl_atr: 2.5           # 止损 = 入场 ∓ 2.5 × ATR
+  leverage:             # 动态杠杆: 强信号高倍, 弱信号低倍试错
+    min: 1
+    max: 5
+
+risk:
+  max_single_order_notional: 1000   # 单笔名义价值上限 (U)
+  max_total_position_notional: 2000 # 总持仓上限 (U)
+  margin_per_position: 200          # 单笔保证金预算 (U) × 杠杆 = 实际名义仓位
+  daily_loss_stop: 0.30             # 日亏损 30% 熔断
+  cooldown_minutes: 60              # 平仓冷静期
+```
+
+### 3️⃣ 自动学习配置（`config.yaml` 内 `learner` 段）
+
+```yaml
+learner:
+  enabled: true         # 启动时 + 每24小时自动学习一轮
+  days: 90              # 用最近90天主网行情回测
+  interval_hours: 24    # 学习间隔
+```
+
+---
+
+## 🚀 怎么使用
 
 ### 1. 安装依赖
 
@@ -20,7 +92,15 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-### 2. 启动（默认 paper 模拟模式，无需 API Key）
+### 2. 配置 `.env`
+
+按上文复制 `.env.example` 并填写。**先跑 paper 模式验证全流程**，再切 live：
+
+```bash
+TRADING_MODE=paper   # 先模拟
+```
+
+### 3. 启动
 
 ```bash
 .venv/bin/python run.py
@@ -28,200 +108,156 @@ python3 -m venv .venv
 
 打开浏览器访问 **http://127.0.0.1:8090** 查看仪表盘。
 
-> 当前环境注意：如果测试网连接失败（SSL 错误），检查本机代理（Clash 等）的节点是否可用，
-> 本项目依赖代理访问 `testnet.binancefuture.com`（该域名国内网络不可直连）。
+> 🌐 **网络要求**：测试网 `testnet.binancefuture.com` 国内网络不可直连，需要代理（Clash 等）且代理节点可用。自动学习回测走主网 `fapi.binance.com`（公开数据，无需密钥）。
 
-### 3. 切换到真实测试网下单（live）
+### 4. 切换到真实测试网下单（live）
 
-1. 打开 https://testnet.binance.vision ，用 GitHub 账号登录
+1. 打开 https://testnet.binance.vision，GitHub 账号登录
 2. 创建 API Key，保存 **API Key** 和 **Secret Key**
 3. 页面底部点 **Request testnet funds** 领取测试资金（每次 10,000 USDT）
-4. 复制 `.env.example` 为 `.env` 并填写：
+4. 编辑 `.env`：
+   ```ini
+   TRADING_MODE=live
+   BINANCE_TESTNET_API_KEY=你的Key
+   BINANCE_TESTNET_API_SECRET=你的Secret
+   ```
+5. 重启：`.venv/bin/python run.py`（日志显示 `模式: live`）
+
+### 5. 24h 守护运行
+
+**方式 A：手动守护脚本**（任何环境可用，推荐）：
 
 ```bash
-cp .env.example .env
-# 编辑 .env:
-TRADING_MODE=live
-BINANCE_TESTNET_API_KEY=你的Key
-BINANCE_TESTNET_API_SECRET=你的Secret
+cd binance-quant
+./deploy/manual.sh start    # 启动 (nohup + PID 文件)
+./deploy/manual.sh status   # 状态
+./deploy/manual.sh logs     # 日志
+./deploy/manual.sh stop     # 停止
 ```
 
-5. 重启系统：`.venv/bin/python run.py`（日志会显示 `模式: live`）
-
----
-
-## 配置说明（config.yaml）
-
-| 配置项 | 默认值 | 说明 |
-|---|---|---|
-| `mode` | paper | `paper`=模拟 / `live`=真实测试网 |
-| `timeframe` | 5m | K线周期：1m/5m/15m/1h |
-| `symbols` | BTC/ETH/BNB/SOL/XRP | 交易对列表 |
-| `leverage.mode` | auto | `auto`=按波动率动态调整 / `fixed`=固定 |
-| `risk.max_single_order_notional` | 200 | 单笔下单名义价值上限 (U) |
-| `risk.max_total_position_notional` | 2000 | 全部持仓名义价值上限 (U) |
-| `risk.daily_loss_stop` | 0.30 | 日亏损 30% 熔断停机 |
-| `risk.cooldown_minutes` | 10 | 每个币种平仓后冷静期 |
-| `signal.open_threshold` | 0.35 | 综合评分超过此值开仓 |
-| `signal.close_threshold` | 0.15 | 综合评分低于此值平仓 |
-| `position.tp_atr` / `sl_atr` | 2.0 / 1.5 | ATR 止盈止损倍数 |
-| `web.port` | 8090 | 仪表盘端口 |
-
----
-
-## 策略引擎工作原理
-
-每个 K 线周期（默认 5 分钟），系统对每个交易对执行：
-
-1. **指标计算**：EMA、RSI、布林带、ATR、趋势强度
-2. **市场状态识别**：`|趋势强度| / ATR% ≥ 0.3` → 趋势市（上涨/下跌），否则震荡市
-3. **策略评分**：四个策略各自输出 [-1, 1] 评分
-4. **权重组合**：不同市场状态使用不同权重（震荡市网格为主，趋势市均线/布林突破为主）
-5. **信号执行**：综合评分 ≥ +0.35 开多，≤ -0.35 开空；持仓中评分减弱平仓
-6. **动态杠杆**：`杠杆 = 3 / 波动比`，限制在 1x–5x
-
-### 止盈止损（ATR 动态跟踪）
-
-- 止盈：入场价 ± 2.0 × ATR
-- 止损：入场价 ∓ 1.5 × ATR
-- 每 5 秒检查一次，实时监控价格触发
-
-### 熔断机制
-
-当日亏损达到 30% 时系统自动熔断：停止开新仓（live 模式额外平掉所有持仓），
-次日 0 点（UTC）自动重置，或点击仪表盘"重置今日"手动解除。
-
----
-
-## Web 仪表盘
-
-| 区域 | 内容 |
-|---|---|
-| 顶部 | **心跳指示**（主循环真实更新时间，>10秒变黄、>60秒变红告警）、模式徽章（PAPER/LIVE）、运行状态、暂停/恢复、重置今日 |
-| 概览卡片 | 总权益、今日盈亏、未实现盈亏、持仓敞口、累计交易/胜率、手续费 |
-| 权益曲线 | 实时权益走势 + 今日起始线 |
-| 行情&持仓 | 各币种价格、24h涨跌、市场状态、综合评分、持仓方向/数量/杠杆、TP/SL |
-| 策略信号 | 每币种四策略评分、波动比、建议杠杆 |
-| **操作日志** | **系统每一步动作的时间线：启动/开仓/平仓/熔断/风控拒绝/AI调参/暂停恢复（保留200条）** |
-| 成交记录 | 最近 30 笔开平仓明细（含盈亏、手续费、原因） |
-
----
-
-## 项目结构
-
-```
-binance-quant/
-├── run.py                 # 入口：启动交易引擎 + Web 服务
-├── config.yaml            # 全部配置
-├── .env                   # API Key（live 模式需要）
-├── core/
-│   ├── exchange.py        # 测试网 REST 客户端（公开+签名）
-│   ├── indicators.py      # EMA/RSI/布林带/ATR/趋势强度
-│   ├── state.py           # 持仓/成交/权益状态 + 持久化
-│   ├── risk.py            # 风控：限额/熔断/冷静期
-│   └── logger.py          # 日志
-├── strategies/
-│   ├── engine.py          # 市场状态识别 + 权重组合 + 动态杠杆
-│   ├── grid.py            # 网格策略
-│   ├── ma_cross.py        # 均线交叉策略
-│   ├── rsi.py             # RSI 超买超卖策略
-│   └── bollinger.py       # 布林带策略
-├── engine/
-│   ├── trader.py          # 主循环：行情/止盈止损/信号执行
-│   └── execution.py       # paper 模拟撮合 / live 真实下单
-└── web/
-    ├── app.py             # FastAPI
-    └── static/            # 仪表盘前端
-```
-
-## 日志
-
-- 控制台实时输出
-- `logs/quant.log` 滚动文件（5MB × 3 份）
-- `data/state.json` 状态持久化（重启自动恢复持仓和历史成交）
-
-## 风险提示
-
-- 本系统仅用于 **测试网**，资金为虚拟资金
-- 量化交易存在模型/行情风险，实盘前请充分回测
-- 切换 live 模式前请确认风控参数符合你的预期
-
----
-
-## 🆕 三大扩展模块
-
-### 1. 回测模块（验证策略参数）
-
-用**主网真实历史K线**逐根模拟实盘（含盘中止盈止损、双边手续费、真实仓位精度），输出收益/胜率/盈亏比/Sharpe/最大回撤：
-
-```bash
-.venv/bin/python backtest.py                          # 默认 BTCUSDT 5m 最近3000根
-.venv/bin/python backtest.py --symbol ETHUSDT --timeframe 15m --bars 5000
-.venv/bin/python backtest.py --days 30                # 最近30天
-```
-
-结果保存到 `data/backtest_result.json`。
-
-### 2. AI 自动调参（策略自学习）
-
-以回测为评估函数，随机搜索 + 爬山优化 12 个参数（阈值/止盈止损/网格/RSI/均线/布林带），**只在评分显著提升时应用**：
-
-```bash
-.venv/bin/python tune.py                              # 手动跑一轮优化
-.venv/bin/python tune.py --symbol ETHUSDT --trials 30 # 更多尝试
-```
-
-- 优化结果写入 `data/tuned_params.json`，系统启动时自动合并生效
-- 系统内已内置**定时自学习**：每 6 小时自动跑一轮优化（`config.yaml` 的 `tuning` 段可调），显著更优时自动应用并通过 Telegram 通知
-
-### 3. Telegram 手机通知
-
-开仓/平仓/熔断/AI调参实时推送到手机：
-
-1. Telegram 里找 **@BotFather** → `/newbot` 创建机器人 → 拿到 token
-2. 找 **@userinfobot** 查询你的 chat_id
-3. 填入 `.env`：
-```bash
-TELEGRAM_BOT_TOKEN=你的token
-TELEGRAM_CHAT_ID=你的chat_id
-```
-4. 重启系统 `python run.py` 即生效（不配置则静默跳过）
-
----
-
-## 🕐 24小时守护服务（launchd 定时任务）
-
-交易系统已注册为 macOS 守护任务：**开机自动启动、崩溃 3 秒内自动重启、不依赖终端窗口**。
+**方式 B：launchd 开机自启**（macOS）：
 
 ```bash
 cd binance-quant/deploy
-./service.sh status        # 查看状态
-./service.sh logs          # 查看日志
-./service.sh stop          # 停止服务（交易暂停）
-./service.sh start         # 重新启动
-./service.sh uninstall     # 卸载守护服务
+./service.sh install    # 安装守护服务 (开机自启 + 崩溃自动重启)
+./service.sh status     # 查看状态
+./service.sh start|stop # 启停
+./service.sh uninstall  # 卸载
 ```
 
-- 配置文件：`deploy/com.binance-quant.trading.plist`（已安装到 `~/Library/LaunchAgents/`）
-- 系统内部调度：每 5 秒行情监控 / 每 5 分钟策略决策 / 每 6 小时 AI 自动调参
-- 重启电脑后服务会自动恢复，无需任何手动操作
+### 6. 回测 / 工具
+
+```bash
+.venv/bin/python backtest.py                            # 默认 BTCUSDT 5m 最近3000根
+.venv/bin/python backtest.py --symbol ETHUSDT --timeframe 4h --days 90
+.venv/bin/python tune.py                                # 手动跑一轮参数优化 (multi模式)
+.venv/bin/python scripts/income_query.py                # 查交易所资金流水(真实盈亏)
+```
 
 ---
 
-## 🎓 关于盈亏的诚实说明（重要）
+## 📊 仪表盘说明
 
-**当前参数组合在回测和实盘中都验证为负期望**，原因：单笔 200U 小仓位 × 0.05% 手续费 × 5m 高频交易，手续费（往返 0.2U/笔）超过平均毛利润，数学上必亏。
+| 区域 | 内容 |
+|---|---|
+| 顶部 | 心跳指示（主循环真实更新时间）、模式徽章、运行状态、暂停/恢复、重置今日 |
+| 概览卡片 | 总权益、今日盈亏、未实现盈亏、持仓敞口、累计交易/胜率、手续费 |
+| 权益曲线 | 实时权益走势 + 今日起始线 |
+| 行情&持仓 | 各币种价格、24h涨跌、持仓方向/数量/杠杆、TP/SL |
+| 策略信号 | Donchian 方向、信号强度、动态杠杆（强信号高倍） |
+| **自动学习历史** | 每轮学习的排名（最优组合/评分/第2/第3名），直观看到策略怎么进化 |
+| **操作日志** | 系统每一步动作时间线：启动/开仓/平仓/熔断/学习/风控（保留200条） |
+| **成交记录** | 下单/卖出逐笔流水（交易所真实成交，含手续费/盈亏） |
 
-这不是系统故障——实盘亏损与回测预测完全吻合，说明系统执行是忠实的。
+---
 
-**测试网的价值是流程验证，不是赚钱**。本系统已真实验证：
-- ✅ 自动下单（测试网真实成交，交易所可查）
-- ✅ 三种平仓规则（止盈/止损/信号消失）均真实触发
-- ✅ 风控（单笔/总持仓限额、日亏熔断、冷静期）
-- ✅ 24h 守护（launchd 开机自启、崩溃 3 秒自动重启）
-- ✅ 操作日志时间线 + 真实心跳（每 5 秒）
-- ✅ AI 自动调参（能找到更优参数，但救不了负期望的数学结构）
-- ✅ 回测模块（诚实地提前预言了亏损——这是它最大的价值）
-- ✅ Web 仪表盘实时监控
+## 🧠 系统工作原理
 
-**未来若要做真实盈利策略**：转向低频趋势跟踪（1d 级别、持仓数天、大幅降频）、放大单笔资金量让手续费占比下降、或使用 maker 限价单降费；所有改动必须先主网长历史回测验证再实盘。
+### 策略：Donchian 通道突破
+
+- **入场**：收盘价突破前 `entry_n` 根最高价 → 做多；跌破前 `entry_n` 根最低价 → 做空
+- **止损**：入场价 ∓ `sl_atr × ATR`（波动自适应）
+- **出场**：价格反向突破前 `exit_n` 根通道 → 平仓（无固定止盈，让利润奔跑）
+- 每 5 分钟检测一次突破（避免延迟入场）
+
+### 自动学习进化（每天一次）
+
+```
+策略池(18组合) → 每个组合用最近90天主网K线回测5币 → 评分 = 平均收益 - 0.3×最大回撤
+→ 排序 → 自动切换最优组合实盘 → 历史轮次存入 data/learner_state.json
+```
+
+### 动态杠杆
+
+`信号强度 = 突破深度 / (2×ATR)`，强度越高杠杆越高（1x–5x），名义仓位 = 保证金预算 × 杠杆：
+强突破高倍重仓，弱突破低倍试探，同时限制杠杆保证止损距离 ≥ 50% 强平距离。
+
+### 双保险止损
+
+1. **交易所侧**：止损单挂交易所（STOP_MARKET），行情断流/本地崩溃也能触发
+2. **本地侧**：每 5 秒轮询，触发后市价平仓（reduceOnly 防反向开仓）
+
+---
+
+## 📂 项目结构
+
+```
+binance-quant/
+├── run.py                 # 入口: 启动交易引擎 + Web 服务
+├── config.yaml            # 全部配置
+├── .env                   # API 密钥 (git 忽略, 从 .env.example 复制)
+├── backtest.py / tune.py  # 回测 / 参数优化工具
+├── core/
+│   ├── exchange.py        # 测试网 REST 客户端 (+ Algo Order 止损单)
+│   ├── learner.py         # 自动学习进化 (策略池回测评分)
+│   ├── orders.py          # 交易所成交记录重建
+│   ├── state.py           # 状态持久化 (持仓/成交/权益/流水)
+│   ├── risk.py            # 风控: 限额/熔断/冷静期
+│   └── indicators.py      # ATR/EMA/RSI/布林带
+├── strategies/
+│   ├── donchian.py        # 当前主力策略: 通道突破 + 动态杠杆
+│   └── (grid/ma_cross/rsi/bollinger)  # 旧多策略引擎 (保留可切回)
+├── engine/
+│   ├── trader.py          # 主循环: 行情/止损/信号/学习
+│   └── execution.py       # paper 模拟 / live 真实下单
+├── deploy/                # launchd + 手动守护脚本
+├── scripts/               # 工具脚本 (盈亏查询等)
+└── web/                   # FastAPI + 仪表盘前端
+```
+
+---
+
+## 📜 日志与数据
+
+| 路径 | 内容 |
+|---|---|
+| `logs/quant.log` | 运行日志（滚动 5MB×3） |
+| `logs/console.log` | 手动守护的 console 输出 |
+| `data/state.json` | 状态持久化（git 忽略） |
+| `data/learner_state.json` | 自动学习结果与历史轮次 |
+| `data/backtest_result.json` | 最近一次回测结果 |
+
+---
+
+## ⚠️ 风险提示（诚实说明）
+
+- **测试网的价值是流程验证，不是赚钱**。虚拟资金无真实风险，但也不产生真实收益
+- Donchian 长周期趋势跟踪在 4 年主网回测中 5 币全正（+11.8% 平均），但**历史表现 ≠ 未来表现**
+- 短周期（5m/15m/1h）策略已被回测证明负期望（手续费 0.05%×2 吃掉利润），已弃用
+- 切换 live 模式前请确认风控参数符合预期；实盘前务必用主网长历史充分回测
+
+---
+
+## 🛠️ 常见问题
+
+**Q: 仪表盘显示"行情获取失败"？**
+A: 代理节点不可用。检查 Clash 等代理，切换可用节点后自动恢复（止损由交易所兜底，不受影响）。
+
+**Q: 为什么不开仓？**
+A: 当前是长周期趋势跟踪（2h~1d），需要价格突破通道才开仓，震荡行情会长时间等待，属正常。
+
+**Q: 自动学习多久跑一次？**
+A: 启动时立即跑一轮，之后每 24 小时一轮（`config.yaml` 的 `learner.interval_hours` 可调）。
+
+**Q: 怎么确认系统真的在交易？**
+A: 仪表盘"成交记录"展示交易所逐笔真实成交（下单/卖出），"操作日志"有开平仓时间线。
