@@ -8,6 +8,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from core.autostart import (disable as autostart_disable,
+                            enable as autostart_enable,
+                            status as autostart_status)
+
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -41,6 +45,10 @@ class NetworkBody(BaseModel):
 
 class MainnetQuotaBody(BaseModel):
     custom_limit: float = 0.0
+
+
+class AutostartBody(BaseModel):
+    enabled: bool = False
 
 
 def create_app(engine) -> FastAPI:
@@ -140,6 +148,7 @@ def create_app(engine) -> FastAPI:
                 and (engine.cfg.get("api_mainnet") or {}).get("secret")
             ),
             "mainnet": engine.mainnet_cap_info(),   # 解锁倒计时/档位/限额/警告
+            "autostart": autostart_status(),        # 开机自启状态 (macOS launchd)
         }
 
     @app.post("/api/settings/modes")
@@ -197,6 +206,12 @@ def create_app(engine) -> FastAPI:
         写入 config.yaml 并热生效, 重启后保留。
         """
         return engine.set_mainnet_custom_limit(body.custom_limit)
+
+    @app.post("/api/settings/autostart")
+    async def api_settings_autostart(body: AutostartBody):
+        """开关开机自启 (macOS launchd): enabled=true 安装并加载 LaunchAgent,
+        enabled=false 卸载。当前手动运行的实例不受影响, 下次登录/开机由 launchd 接管。"""
+        return autostart_enable() if body.enabled else autostart_disable()
 
     @app.post("/api/settings/symbols")
     async def api_settings_symbols(body: SymbolsBody):

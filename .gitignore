@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .env
 data/state.json
+data/learner_state.json
 logs/*.log
 logs/app.pid
 .DS_Store

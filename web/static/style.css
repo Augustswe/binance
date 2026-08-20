@@ -60,6 +60,8 @@ h1 { font-size: 17px; font-weight: 600; }
 .btn-warn { color: var(--yellow); border-color: var(--yellow); }
 .btn-warn.on { background: var(--green-bg); color: var(--green); border-color: var(--green); }
 .btn-ghost { color: var(--muted); }
+.btn:disabled { opacity: .45; cursor: not-allowed; border-color: var(--border); color: var(--muted); }
+.btn:disabled:hover { border-color: var(--border); filter: none; }
 
 main { padding: 18px 22px 60px; max-width: 1400px; margin: 0 auto; }
 .cards {

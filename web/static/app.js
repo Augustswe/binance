@@ -633,6 +633,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderSymbolList();
       renderRiskSettings();
       renderNetworkSettings();
+      renderAutostart();
     } catch (e) {
       setMsg("❌ 加载设置失败: " + e, true);
     }
@@ -858,6 +859,33 @@ function renderModeSettings() {
     if (box) box.style.display = net === "mainnet" ? "block" : "none";
   }
 
+  // ---------------- 开机自启 (macOS launchd) ----------------
+  function renderAutostart() {
+    const a = settingsData.autostart;
+    const statusEl = $("set-autostart-status");
+    const btn = $("btn-autostart");
+    if (!statusEl || !btn) return;
+    if (!a || !a.supported) {
+      statusEl.textContent = "❌ 当前系统不支持 (仅 macOS 支持 launchd)";
+      statusEl.style.color = "var(--muted)";
+      btn.textContent = "不支持";
+      btn.disabled = true;
+      return;
+    }
+    btn.disabled = false;
+    if (a.enabled) {
+      statusEl.textContent = "✅ 已开启 (下次登录/开机自动启动)";
+      statusEl.style.color = "var(--green)";
+      btn.textContent = "关闭开机自启";
+      btn.className = "btn btn-warn on";
+    } else {
+      statusEl.textContent = a.installed ? "⭘ 已安装但未加载" : "⭘ 未启用";
+      statusEl.style.color = "var(--muted)";
+      btn.textContent = "启用开机自启";
+      btn.className = "btn btn-ok";
+    }
+  }
+
   async function switchNetwork(net) {
     const m = settingsData.mainnet || (lastSnapshot && lastSnapshot.mainnet);
     if (net === "mainnet" && m && !m.unlocked) {
@@ -933,6 +961,29 @@ function renderModeSettings() {
     if (res.ok) {
       if (settingsData.mainnet) settingsData.mainnet.custom_limit = limit;
       renderNetworkSettings();
+    }
+  });
+
+  // ---------------- 开机自启开关 ----------------
+  $("btn-autostart").addEventListener("click", async () => {
+    const a = settingsData.autostart;
+    if (!a || !a.supported) { setMsg("❌ 当前系统不支持开机自启 (仅 macOS)", true); return; }
+    const enabled = !a.enabled;
+    setMsg(enabled ? "正在开启开机自启…" : "正在关闭开机自启…");
+    const res = await fetch("/api/settings/autostart", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已保存" : "操作失败"), !res.ok);
+    if (res.ok) {
+      // 重新拉取状态以刷新按钮/文案 (避免重复绑定监听)
+      try {
+        const r = await fetch("/api/settings");
+        settingsData = await r.json();
+        enabledModes = settingsData.enabled_modes || [];
+        modeWeights = settingsData.mode_weights || {};
+      } catch (e) { /* 用返回 msg 即可 */ }
+      renderAutostart();
     }
   });
 
