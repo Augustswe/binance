@@ -43,7 +43,7 @@ cp .env.example .env
 # 交易模式: paper = 模拟下单(无需Key) / live = 真实测试网下单(需要Key)
 TRADING_MODE=live
 
-# 测试网 API Key / Secret (获取: https://testnet.binance.vision 用 GitHub 登录创建)
+# 测试网 API Key / Secret (获取: https://testnet.binancefuture.com 用 GitHub 登录创建; 注意是 U本位合约测试网, 非现货 testnet.binance.vision)
 BINANCE_TESTNET_API_KEY=你的Key
 BINANCE_TESTNET_API_SECRET=你的Secret
 
@@ -141,7 +141,7 @@ TRADING_MODE=paper   # 先模拟
 
 ### 4. 切换到真实测试网下单（live）
 
-1. 打开 https://testnet.binance.vision，GitHub 账号登录
+1. 打开 https://testnet.binancefuture.com（U本位合约测试网；现货测试网 testnet.binance.vision 的 Key 与本系统不通用），GitHub 账号登录
 2. 创建 API Key，保存 **API Key** 和 **Secret Key**
 3. 页面底部点 **Request testnet funds** 领取测试资金（每次 10,000 USDT）
 4. 编辑 `.env`：
