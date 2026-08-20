@@ -184,6 +184,8 @@ class TradingState:
                 "atr": atr,
                 "strategy": strategy,
                 "opened_at": time.time(),
+                "high": entry,             # 移动止损: 持仓期间最高价 (从入场价起算)
+                "low": entry,              # 移动止损: 持仓期间最低价
             }
             # paper 模式锁定保证金
             if self.data["mode"] == "paper":

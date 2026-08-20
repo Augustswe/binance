@@ -5,8 +5,8 @@
     "exit_n": 10,
     "sl_atr": 2.0
   },
-  "best_score": 3.5,
-  "learned_at": 1787211022.436764,
+  "best_score": 3.48,
+  "learned_at": 1787211403.1959019,
   "history": [
     {
       "combo": {
@@ -16,9 +16,9 @@
         "sl_atr": 2.0
       },
       "key": "2h-20/10/2.0",
-      "avg_ret": 1.58,
+      "avg_ret": 1.56,
       "avg_dd": -6.41,
-      "score": 3.5,
+      "score": 3.48,
       "symbols_eval": 5
     },
     {
@@ -29,9 +29,9 @@
         "sl_atr": 2.0
       },
       "key": "4h-20/10/2.0",
-      "avg_ret": 0.88,
+      "avg_ret": 0.87,
       "avg_dd": -6.53,
-      "score": 2.84,
+      "score": 2.83,
       "symbols_eval": 5
     },
     {
@@ -42,9 +42,9 @@
         "sl_atr": 2.5
       },
       "key": "2h-40/20/2.5",
-      "avg_ret": 0.85,
+      "avg_ret": 0.83,
       "avg_dd": -6.57,
-      "score": 2.82,
+      "score": 2.8,
       "symbols_eval": 5
     },
     {
@@ -55,9 +55,9 @@
         "sl_atr": 2.2
       },
       "key": "4h-25/12/2.2",
-      "avg_ret": 0.92,
+      "avg_ret": 0.91,
       "avg_dd": -6.24,
-      "score": 2.79,
+      "score": 2.78,
       "symbols_eval": 5
     },
     {
@@ -68,9 +68,9 @@
         "sl_atr": 2.2
       },
       "key": "2h-30/15/2.2",
-      "avg_ret": 0.66,
+      "avg_ret": 0.65,
       "avg_dd": -6.84,
-      "score": 2.71,
+      "score": 2.7,
       "symbols_eval": 5
     },
     {
@@ -81,9 +81,9 @@
         "sl_atr": 2.2
       },
       "key": "4h-30/15/2.2",
-      "avg_ret": 0.49,
+      "avg_ret": 0.48,
       "avg_dd": -6.14,
-      "score": 2.34,
+      "score": 2.32,
       "symbols_eval": 5
     },
     {
@@ -94,9 +94,9 @@
         "sl_atr": 2.5
       },
       "key": "4h-40/15/2.5",
-      "avg_ret": 0.48,
+      "avg_ret": 0.46,
       "avg_dd": -6.02,
-      "score": 2.28,
+      "score": 2.27,
       "symbols_eval": 5
     },
     {
@@ -109,7 +109,7 @@
       "key": "12h-20/10/2.0",
       "avg_ret": 0.13,
       "avg_dd": -6.11,
-      "score": 1.97,
+      "score": 1.96,
       "symbols_eval": 5
     },
     {
@@ -120,9 +120,9 @@
         "sl_atr": 2.2
       },
       "key": "8h-30/15/2.2",
-      "avg_ret": 0.03,
+      "avg_ret": 0.02,
       "avg_dd": -6.4,
-      "score": 1.95,
+      "score": 1.94,
       "symbols_eval": 5
     },
     {
@@ -133,9 +133,9 @@
         "sl_atr": 2.5
       },
       "key": "4h-55/20/2.5",
-      "avg_ret": -0.06,
+      "avg_ret": -0.07,
       "avg_dd": -6.3,
-      "score": 1.83,
+      "score": 1.82,
       "symbols_eval": 5
     },
     {
@@ -159,9 +159,9 @@
         "sl_atr": 2.0
       },
       "key": "8h-20/10/2.0",
-      "avg_ret": -0.27,
+      "avg_ret": -0.28,
       "avg_dd": -6.47,
-      "score": 1.67,
+      "score": 1.66,
       "symbols_eval": 5
     },
     {
@@ -172,7 +172,7 @@
         "sl_atr": 2.5
       },
       "key": "8h-55/20/2.5",
-      "avg_ret": -0.11,
+      "avg_ret": -0.12,
       "avg_dd": -5.58,
       "score": 1.56,
       "symbols_eval": 5
@@ -198,7 +198,7 @@
         "sl_atr": 2.0
       },
       "key": "1d-20/10/2.0",
-      "avg_ret": -0.29,
+      "avg_ret": -0.3,
       "avg_dd": -5.69,
       "score": 1.41,
       "symbols_eval": 5
@@ -211,9 +211,9 @@
         "sl_atr": 2.5
       },
       "key": "1d-55/20/2.5",
-      "avg_ret": 0.02,
+      "avg_ret": 0.01,
       "avg_dd": -4.0,
-      "score": 1.22,
+      "score": 1.21,
       "symbols_eval": 5
     },
     {
@@ -224,9 +224,9 @@
         "sl_atr": 3.0
       },
       "key": "1d-60/25/3.0",
-      "avg_ret": 0.02,
+      "avg_ret": 0.01,
       "avg_dd": -4.0,
-      "score": 1.22,
+      "score": 1.21,
       "symbols_eval": 5
     },
     {
@@ -237,9 +237,9 @@
         "sl_atr": 2.5
       },
       "key": "8h-40/20/2.5",
-      "avg_ret": -0.78,
+      "avg_ret": -0.79,
       "avg_dd": -6.13,
-      "score": 1.06,
+      "score": 1.05,
       "symbols_eval": 5
     }
   ],
@@ -930,6 +930,236 @@
           "key": "8h-40/20/2.5",
           "score": 1.06,
           "avg_ret": -0.78,
+          "avg_dd": -6.13
+        }
+      ]
+    },
+    {
+      "ts": 1787211058.5232131,
+      "best_key": "2h-20/10/2.0",
+      "best_score": 3.48,
+      "rankings": [
+        {
+          "key": "2h-20/10/2.0",
+          "score": 3.48,
+          "avg_ret": 1.56,
+          "avg_dd": -6.41
+        },
+        {
+          "key": "4h-20/10/2.0",
+          "score": 2.83,
+          "avg_ret": 0.87,
+          "avg_dd": -6.53
+        },
+        {
+          "key": "2h-40/20/2.5",
+          "score": 2.8,
+          "avg_ret": 0.83,
+          "avg_dd": -6.57
+        },
+        {
+          "key": "4h-25/12/2.2",
+          "score": 2.78,
+          "avg_ret": 0.91,
+          "avg_dd": -6.24
+        },
+        {
+          "key": "2h-30/15/2.2",
+          "score": 2.7,
+          "avg_ret": 0.65,
+          "avg_dd": -6.84
+        },
+        {
+          "key": "4h-30/15/2.2",
+          "score": 2.32,
+          "avg_ret": 0.48,
+          "avg_dd": -6.14
+        },
+        {
+          "key": "4h-40/15/2.5",
+          "score": 2.27,
+          "avg_ret": 0.46,
+          "avg_dd": -6.02
+        },
+        {
+          "key": "12h-20/10/2.0",
+          "score": 1.96,
+          "avg_ret": 0.13,
+          "avg_dd": -6.11
+        },
+        {
+          "key": "8h-30/15/2.2",
+          "score": 1.94,
+          "avg_ret": 0.02,
+          "avg_dd": -6.4
+        },
+        {
+          "key": "4h-55/20/2.5",
+          "score": 1.82,
+          "avg_ret": -0.07,
+          "avg_dd": -6.3
+        },
+        {
+          "key": "1d-40/15/2.5",
+          "score": 1.79,
+          "avg_ret": 0.24,
+          "avg_dd": -5.16
+        },
+        {
+          "key": "8h-20/10/2.0",
+          "score": 1.66,
+          "avg_ret": -0.28,
+          "avg_dd": -6.47
+        },
+        {
+          "key": "8h-55/20/2.5",
+          "score": 1.56,
+          "avg_ret": -0.12,
+          "avg_dd": -5.58
+        },
+        {
+          "key": "12h-40/20/2.5",
+          "score": 1.49,
+          "avg_ret": -0.19,
+          "avg_dd": -5.59
+        },
+        {
+          "key": "1d-20/10/2.0",
+          "score": 1.41,
+          "avg_ret": -0.29,
+          "avg_dd": -5.69
+        },
+        {
+          "key": "1d-55/20/2.5",
+          "score": 1.21,
+          "avg_ret": 0.01,
+          "avg_dd": -4.0
+        },
+        {
+          "key": "1d-60/25/3.0",
+          "score": 1.21,
+          "avg_ret": 0.01,
+          "avg_dd": -4.0
+        },
+        {
+          "key": "8h-40/20/2.5",
+          "score": 1.05,
+          "avg_ret": -0.78,
+          "avg_dd": -6.13
+        }
+      ]
+    },
+    {
+      "ts": 1787211403.195891,
+      "best_key": "2h-20/10/2.0",
+      "best_score": 3.48,
+      "rankings": [
+        {
+          "key": "2h-20/10/2.0",
+          "score": 3.48,
+          "avg_ret": 1.56,
+          "avg_dd": -6.41
+        },
+        {
+          "key": "4h-20/10/2.0",
+          "score": 2.83,
+          "avg_ret": 0.87,
+          "avg_dd": -6.53
+        },
+        {
+          "key": "2h-40/20/2.5",
+          "score": 2.8,
+          "avg_ret": 0.83,
+          "avg_dd": -6.57
+        },
+        {
+          "key": "4h-25/12/2.2",
+          "score": 2.78,
+          "avg_ret": 0.91,
+          "avg_dd": -6.24
+        },
+        {
+          "key": "2h-30/15/2.2",
+          "score": 2.7,
+          "avg_ret": 0.65,
+          "avg_dd": -6.84
+        },
+        {
+          "key": "4h-30/15/2.2",
+          "score": 2.32,
+          "avg_ret": 0.48,
+          "avg_dd": -6.14
+        },
+        {
+          "key": "4h-40/15/2.5",
+          "score": 2.27,
+          "avg_ret": 0.46,
+          "avg_dd": -6.02
+        },
+        {
+          "key": "12h-20/10/2.0",
+          "score": 1.96,
+          "avg_ret": 0.13,
+          "avg_dd": -6.11
+        },
+        {
+          "key": "8h-30/15/2.2",
+          "score": 1.94,
+          "avg_ret": 0.02,
+          "avg_dd": -6.4
+        },
+        {
+          "key": "4h-55/20/2.5",
+          "score": 1.82,
+          "avg_ret": -0.07,
+          "avg_dd": -6.3
+        },
+        {
+          "key": "1d-40/15/2.5",
+          "score": 1.79,
+          "avg_ret": 0.24,
+          "avg_dd": -5.16
+        },
+        {
+          "key": "8h-20/10/2.0",
+          "score": 1.66,
+          "avg_ret": -0.28,
+          "avg_dd": -6.47
+        },
+        {
+          "key": "8h-55/20/2.5",
+          "score": 1.56,
+          "avg_ret": -0.12,
+          "avg_dd": -5.58
+        },
+        {
+          "key": "12h-40/20/2.5",
+          "score": 1.49,
+          "avg_ret": -0.19,
+          "avg_dd": -5.59
+        },
+        {
+          "key": "1d-20/10/2.0",
+          "score": 1.41,
+          "avg_ret": -0.3,
+          "avg_dd": -5.69
+        },
+        {
+          "key": "1d-55/20/2.5",
+          "score": 1.21,
+          "avg_ret": 0.01,
+          "avg_dd": -4.0
+        },
+        {
+          "key": "1d-60/25/3.0",
+          "score": 1.21,
+          "avg_ret": 0.01,
+          "avg_dd": -4.0
+        },
+        {
+          "key": "8h-40/20/2.5",
+          "score": 1.05,
+          "avg_ret": -0.79,
           "avg_dd": -6.13
         }
       ]

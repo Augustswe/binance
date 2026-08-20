@@ -404,6 +404,11 @@ class TradingEngine:
                 self.state.add_event("info", f"🛡 {sym} 补算止损 SL={pos['sl']:.2f}")
                 # 补算后立即把止损下到交易所
                 await self._place_exchange_stop(sym, pos)
+
+            # ---- 移动止损 (trailing stop): donchian 模式, 随新高/新低锁浮盈 ----
+            if self.strategy_mode == "donchian":
+                await self._update_trailing_stop(sym, pos, p, atr)
+
             if pos["side"] == "LONG":
                 if pos.get("tp") and p >= pos["tp"]:
                     trade = await self.execution.close_position(sym, p, "止盈TP")
@@ -423,17 +428,71 @@ class TradingEngine:
                     if trade:
                         await self._notify_close(trade)
 
-    async def _place_exchange_stop(self, sym: str, pos: dict) -> bool:
-        """把止损单挂到交易所 (交易所侧自动执行, 行情断流也能止损)"""
+    async def _update_trailing_stop(self, sym: str, pos: dict, price: float, atr: float) -> None:
+        """移动止损: 价格创新高/新低时, 把止损线跟上去, 锁住浮盈
+
+        LONG: 止损 = 持仓期间最高价 - trail_atr×ATR (只上移, 不下移)
+        SHORT: 止损 = 持仓期间最低价 + trail_atr×ATR (只下移, 不上移)
+        同时同步更新交易所止损单, 保证行情断流也能锁利
+        """
+        trail_cfg = self.cfg.get("donchian", {}).get("trail", {})
+        if not trail_cfg.get("enabled", True):
+            return
+        trail_atr = float(trail_cfg.get("atr_mult", 2.0))
+        min_move = float(trail_cfg.get("min_pct", 0.004))
+
+        # 记录持仓期间的最高/最低价
+        if pos["side"] == "LONG":
+            pos["high"] = max(pos.get("high") or pos["entry"], price)
+            if atr and atr > 0:
+                new_sl = pos["high"] - trail_atr * atr
+                cur_sl = pos.get("sl") or 0.0
+                # 只上移 (锁利), 且至少移动 min_pct 才更新
+                if new_sl > cur_sl and (new_sl - cur_sl) / price >= min_move:
+                    pos["sl"] = round(new_sl, 2)
+                    pos["trail_count"] = pos.get("trail_count", 0) + 1
+                    self.log.info("[%s] 移动止损上移: SL %.2f → %.2f (最高 %.2f)",
+                                  sym, cur_sl, pos["sl"], pos["high"])
+                    self.state.add_event(
+                        "info",
+                        f"🎯 {sym} 移动止损上移 {cur_sl:.2f} → {pos['sl']:.2f} (最高 {pos['high']:.2f})",
+                    )
+                    await self._place_exchange_stop(sym, pos, force=True)
+        else:  # SHORT
+            pos["low"] = min(pos.get("low") or pos["entry"], price)
+            if atr and atr > 0:
+                new_sl = pos["low"] + trail_atr * atr
+                cur_sl = pos.get("sl") or 0.0
+                # 只下移 (锁利), 且至少移动 min_pct 才更新
+                if 0 < new_sl < cur_sl and (cur_sl - new_sl) / price >= min_move:
+                    pos["sl"] = round(new_sl, 2)
+                    pos["trail_count"] = pos.get("trail_count", 0) + 1
+                    self.log.info("[%s] 移动止损下移: SL %.2f → %.2f (最低 %.2f)",
+                                  sym, cur_sl, pos["sl"], pos["low"])
+                    self.state.add_event(
+                        "info",
+                        f"🎯 {sym} 移动止损下移 {cur_sl:.2f} → {pos['sl']:.2f} (最低 {pos['low']:.2f})",
+                    )
+                    await self._place_exchange_stop(sym, pos, force=True)
+
+    async def _place_exchange_stop(self, sym: str, pos: dict, force: bool = False) -> bool:
+        """把止损单挂到交易所 (交易所侧自动执行, 行情断流也能止损)
+
+        force=True: 已挂过但止损价变了 (移动止损) → 先撤旧单再挂新价
+        """
         if self.cfg["mode"] != "live":
             return False
         sl = pos.get("sl")
         if not sl or sl <= 0:
             return False
-        if pos.get("stop_placed"):
+        if pos.get("stop_placed") and not force:
             return True
         stop_side = "SELL" if pos["side"] == "LONG" else "BUY"
         try:
+            if force and pos.get("stop_placed"):
+                # 移动止损: 先撤掉旧止损单, 避免重复/冲突
+                await asyncio.to_thread(self.exchange.cancel_all_orders, sym)
+                pos["stop_placed"] = False
             await asyncio.to_thread(
                 self.exchange.place_stop_market, sym, stop_side, sl
             )

@@ -20,6 +20,11 @@ donchian:
   leverage:
     min: 1           # 弱信号最低杠杆 (试探仓)
     max: 5           # 强信号最高杠杆 (重仓)
+  # 移动止损 (trailing stop): 随价格创新高/新低上移/下移止损线, 锁住浮盈
+  trail:
+    enabled: true    # 开启移动止损
+    atr_mult: 2.0    # 止损线 = 极值 ∓ 2.0 × ATR (趋势中跟随)
+    min_pct: 0.004   # 止损线至少移动 0.4% 才更新 (防频繁微调)
 
 # 行情/持仓监控间隔 (秒)
 poll_interval: 5
