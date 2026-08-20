@@ -128,7 +128,7 @@ TRADING_MODE=paper   # 先模拟
 
 | 系统 | 启动 | 关闭 |
 |---|---|---|
-| macOS / Linux | 终端运行 `./start.sh` | 终端运行 `./stop.sh` |
+| macOS / Linux | 终端运行 `./start.sh`，或双击 `start.command` | 终端运行 `./stop.sh`，或双击 `stop.command` |
 | Windows | 双击 `start.bat` | 双击 `stop.bat` |
 
 - **start**：若没有虚拟环境会自动建 `.venv` 并 `pip install -r requirements.txt`（仅首次较慢）；服务已在运行时只打开浏览器；启动后访问 http://127.0.0.1:8090
@@ -298,8 +298,9 @@ cd binance-quant/deploy
 ```
 binance-quant/
 ├── run.py                 # 入口: 启动交易引擎 + Web 服务
-├── start.sh / stop.sh     # 一键启动 / 关闭 (macOS / Linux)
-├── start.bat / stop.bat   # 一键启动 / 关闭 (Windows)
+├── start.sh / stop.sh     # 一键启动 / 关闭 (macOS / Linux, 终端运行)
+├── start.command / stop.command  # 同上, macOS 双击即可运行
+├── start.bat / stop.bat   # 一键启动 / 关闭 (Windows, 双击运行)
 ├── config.yaml            # 全部配置
 ├── .env                   # API 密钥 (git 忽略, 从 .env.example 复制)
 ├── backtest.py / tune.py  # 回测 / 参数优化工具
