@@ -215,6 +215,12 @@ function renderSymbols(s) {
     }
   }
 
+  // 用户正在编辑止盈止损输入框时, 跳过本周期整表重建, 避免打断输入/吞掉点击
+  if (tpslOpenSym && document.activeElement && document.activeElement.closest &&
+      document.activeElement.closest(".tpsl-detail")) {
+    return;
+  }
+
   let html = "";
   for (const sym of order) {
     const price = s.prices[sym];
@@ -251,11 +257,6 @@ function renderSymbols(s) {
     if (open) html += tpslDetailRow(pos);
   }
   tb.innerHTML = html || `<tr><td colspan="12" class="empty">暂无数据</td></tr>`;
-
-  // 事件绑定
-  tb.querySelectorAll(".tpsl-btn").forEach((b) => { b.onclick = () => toggleTpsl(b.dataset.sym); });
-  tb.querySelectorAll(".tpsl-apply").forEach((b) => { b.onclick = onTpslApply; });
-  tb.querySelectorAll(".tpsl-clear").forEach((b) => { b.onclick = onTpslClear; });
 
   // 恢复焦点到正在编辑的输入框 (轮询重建后不打断输入)
   if (activeField && tpslOpenSym) {
@@ -351,7 +352,7 @@ function toggleTpsl(sym) {
 }
 
 async function onTpslApply(e) {
-  const tr = e.currentTarget.closest("tr");
+  const tr = e.target.closest("tr");
   const sym = tr.getAttribute("data-sym");
   const tpType = tr.querySelector(".tp-type").value;
   const tpVal = tr.querySelector(".tp-val").value;
@@ -367,7 +368,7 @@ async function onTpslApply(e) {
 }
 
 async function onTpslClear(e) {
-  const tr = e.currentTarget.closest("tr");
+  const tr = e.target.closest("tr");
   const sym = tr.getAttribute("data-sym");
   tpslCache[sym] = {};
   await postManualTPSL(sym, null, null);
@@ -689,6 +690,21 @@ document.addEventListener("DOMContentLoaded", () => {
   loadConfig();
   refresh();
   setInterval(refresh, REFRESH_MS);
+
+  // 事件委托: 止盈止损按钮/应用/清除
+  // 关键: 后台每 5s 会整表 rebuild (innerHTML), 若在按钮上逐个绑 onclick 会被销毁, 导致点击落空.
+  // 改在稳定的 <tbody> 上委托, 无论表格何时重建, 点击都能命中.
+  const symTb = document.querySelector("#symbols-table tbody");
+  if (symTb) {
+    symTb.addEventListener("click", (e) => {
+      const btn = e.target.closest(".tpsl-btn");
+      if (btn) { toggleTpsl(btn.dataset.sym); return; }
+      const apply = e.target.closest(".tpsl-apply");
+      if (apply) { onTpslApply(e); return; }
+      const clear = e.target.closest(".tpsl-clear");
+      if (clear) { onTpslClear(e); return; }
+    });
+  }
   startHeartbeatTicker();
   loadLearner();
   setInterval(loadLearner, 30000);
