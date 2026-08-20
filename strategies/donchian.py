@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import time
+
 import numpy as np
 
 from core.indicators import atr
@@ -111,7 +113,7 @@ class DonchianEngine:
         regime = "trend_up" if action == "LONG" else ("trend_down" if action == "SHORT" else "ranging")
         return DonchianSignal(
             action=action, entry=c, sl=sl, atr=a, regime=regime,
-            ts=klines[-1]["open_time"] / 1000.0,
+            ts=time.time(),   # 实际分析时间 (每5分钟刷新), 而非K线开盘时间
             up_level=up_level, dn_level=dn_level,
             strength=strength, leverage=leverage,
         )

@@ -215,16 +215,26 @@ function renderSignals(s) {
       continue;
     }
     if (g.mode === "donchian") {
+      // 距通道距离: 价格离上轨/下轨多远 (等待突破时的关键观察点)
+      const price = s.prices[sym];
+      let dist = "--";
+      if (price > 0 && g.up_level > 0 && g.dn_level > 0) {
+        const toUp = (g.up_level - price) / price * 100;
+        const toDn = (price - g.dn_level) / price * 100;
+        dist = `上${sign(-toUp)}${fmt(Math.abs(toUp), 2)}% / 下${sign(-toDn)}${fmt(Math.abs(toDn), 2)}%`;
+      }
+      const waiting = g.action === "等待";
       html += `<tr>
         <td><b>${sym}</b></td>
         <td>${regimePill(g.regime)}</td>
-        <td class="mono">${g.action === "等待" ? "--" : (g.action === "LONG" ? "▲做多" : "▼做空")}</td>
+        <td class="mono">${waiting ? '<span class="pill pill-none">⏳等待突破</span>' : (g.action === "LONG" ? '<span class="pill pill-long">▲做多</span>' : '<span class="pill pill-short">▼做空</span>')}</td>
         <td>${scoreBar(g.combined)}</td>
         <td class="mono">${fmt(g.atr_pct, 3)}%</td>
         <td class="mono">${fmt(g.strength, 2)}</td>
         <td class="mono ${g.leverage > 1 ? "pos" : ""}">${g.leverage}x</td>
+        <td class="mono">${dist}</td>
         <td class="mono">${fmtTime(g.ts)}</td>
-        <td colspan="4"></td>
+        <td colspan="3"></td>
       </tr>`;
       continue;
     }
