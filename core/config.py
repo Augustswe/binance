@@ -121,6 +121,17 @@ def update_config_risk(risk: dict, leverage: dict) -> None:
     path.write_text(text + "\n", encoding="utf-8")
 
 
+def update_config_mainnet(values: dict) -> None:
+    """更新 config.yaml 的 mainnet 块 (since/custom_limit), 文本级替换保留注释与顺序
+
+    Web 设置面板"主网自定义额度"保存时调用, 重启后依然生效。
+    """
+    path = BASE_DIR / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    text = _replace_block_values(text, "mainnet", values)
+    path.write_text(text + "\n", encoding="utf-8")
+
+
 def update_config_network(network: str) -> None:
     """更新 config.yaml 顶层 network 键 (testnet/mainnet), 保留注释与顺序
 
@@ -246,6 +257,16 @@ def load_config(path: str | None = None) -> dict:
     if net in ("testnet", "mainnet"):
         cfg["network"] = net
     cfg.setdefault("network", "testnet")
+    # 主网分级解锁配置 (since 可回填历史起点; custom_limit 跑满90天后自定义)
+    mnet = cfg.setdefault("mainnet", {})
+    try:
+        mnet["since"] = float(mnet["since"]) if mnet.get("since") is not None else 0.0
+    except (TypeError, ValueError):
+        mnet["since"] = 0.0
+    try:
+        mnet["custom_limit"] = float(mnet.get("custom_limit", 0) or 0)
+    except (TypeError, ValueError):
+        mnet["custom_limit"] = 0.0
     # 合并 AI 调参结果
     _merge_tuned(cfg)
     return cfg

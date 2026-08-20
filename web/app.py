@@ -39,6 +39,10 @@ class NetworkBody(BaseModel):
     network: str = "testnet"
 
 
+class MainnetQuotaBody(BaseModel):
+    custom_limit: float = 0.0
+
+
 def create_app(engine) -> FastAPI:
     app = FastAPI(title="Binance 测试网量化仪表盘", docs_url=None, redoc_url=None)
 
@@ -59,6 +63,7 @@ def create_app(engine) -> FastAPI:
         snap = engine.get_snapshot()
         snap["api"] = engine.api_status()   # 登录状态徽章用
         snap["network"] = engine.cfg["network"]   # 主网红色横幅用
+        snap["mainnet"] = engine.mainnet_cap_info()   # 主网分级解锁/限额信息 (横幅与档位展示)
         return snap
 
     @app.get("/api/config")
@@ -134,6 +139,7 @@ def create_app(engine) -> FastAPI:
                 (engine.cfg.get("api_mainnet") or {}).get("key")
                 and (engine.cfg.get("api_mainnet") or {}).get("secret")
             ),
+            "mainnet": engine.mainnet_cap_info(),   # 解锁倒计时/档位/限额/警告
         }
 
     @app.post("/api/settings/modes")
@@ -179,10 +185,18 @@ def create_app(engine) -> FastAPI:
     async def api_settings_network(body: NetworkBody):
         """切换交易网络 (testnet/mainnet): 热生效, 无需重启
 
-        主网 = 真实资金, engine.set_network 内含服务端校验 (主网必须有 Key) 与
+        主网 = 真实资金, engine.set_network 内含服务端校验 (未解锁禁止切换 / 主网必须有 Key) 与
         live 模式下的持仓清空, 防止误触。
         """
         return engine.set_network(body.network)
+
+    @app.post("/api/settings/mainnet-quota")
+    async def api_settings_mainnet_quota(body: MainnetQuotaBody):
+        """设置主网自定义限额 (仅跑满90天/t3 档位允许); 否则拒绝。
+
+        写入 config.yaml 并热生效, 重启后保留。
+        """
+        return engine.set_mainnet_custom_limit(body.custom_limit)
 
     @app.post("/api/settings/symbols")
     async def api_settings_symbols(body: SymbolsBody):

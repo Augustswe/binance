@@ -46,12 +46,19 @@ async function loadConfig() {
   } catch (e) { /* ignore */ }
 }
 
-// 主网红色横幅: 仅当 network=mainnet 时显示
+// 主网红色横幅: 仅当 network=mainnet 时显示, 并动态带出当前限额与警告
 function updateNetBanner() {
   const banner = $("net-banner");
   if (!banner) return;
   const net = (cfg && cfg.network) || lastSnapshot?.network || "testnet";
-  banner.style.display = net === "mainnet" ? "block" : "none";
+  if (net !== "mainnet") { banner.style.display = "none"; return; }
+  banner.style.display = "block";
+  const m = lastSnapshot?.mainnet;
+  if (m) {
+    banner.innerHTML = `🔴 主网模式 · 真实资金交易 · 总持仓限额 ${fmt(m.cap)}U · ${m.warning}`;
+  } else {
+    banner.innerHTML = "🔴 主网模式 · 真实资金交易 · 每一笔下单都会动用你的真实资产, 请确认风控参数";
+  }
 }
 
 // ---------------- 自动学习历史 ----------------
@@ -159,10 +166,15 @@ async function refresh() {
   renderModes(s);
   renderLogs(s);
 
+  // 风控文案: 主网模式显示主网限额, 否则显示 risk 配置
+  const mn = s.mainnet;
+  const riskTxt = (mn && s.network === "mainnet")
+    ? `主网限额≤${fmt(mn.cap)}U`
+    : `单笔≤${s.risk.max_single}U 总持仓≤${s.risk.max_total}U`;
   $("foot").textContent =
     `模式=${s.mode} | 权益=${fmt(s.equity)} | 起始=${fmt(s.day_start_equity)} | ` +
     `数据更新 ${s.last_tick_ts ? fmtTime(s.last_tick_ts) : "--"} | ` +
-    `风控: 单笔≤${s.risk.max_single}U 总持仓≤${s.risk.max_total}U 日亏${(s.risk.daily_loss_stop * 100)}%熔断`;
+    `风控: ${riskTxt} 日亏${(s.risk.daily_loss_stop * 100)}%熔断`;
 
   // 权益变化闪烁
   if (lastEquity != null && s.equity !== lastEquity) {
@@ -809,22 +821,50 @@ function renderModeSettings() {
   // ---------------- 交易网络切换 ----------------
   function renderNetworkSettings() {
     const net = settingsData.network || (cfg && cfg.network) || "testnet";
+    const m = settingsData.mainnet || (lastSnapshot && lastSnapshot.mainnet) || null;
     const statusEl = $("set-net-status");
     if (statusEl) {
       statusEl.textContent = net === "mainnet"
         ? "💰 主网 (真实资金)" : "🧪 测试网 (虚拟资金)";
       statusEl.style.color = net === "mainnet" ? "var(--red)" : "var(--green)";
     }
-    // 高亮当前选项
+    // 高亮当前选项; 主网未解锁时禁用主网按钮
     document.querySelectorAll(".net-opt").forEach(b => {
       b.classList.toggle("active", b.dataset.net === net);
+      if (b.dataset.net === "mainnet" && m && !m.unlocked) {
+        b.classList.add("disabled");
+      } else {
+        b.classList.remove("disabled");
+      }
     });
+    // 解锁倒计时 / 档位 / 限额警告
+    const warnEl = $("set-net-unlock");
+    if (warnEl) {
+      if (m) {
+        warnEl.textContent = m.warning;
+        warnEl.style.display = "block";
+        warnEl.className = "net-unlock-warn" + (net === "mainnet" ? " on-main" : (m.unlocked ? " ok" : " lock"));
+      } else {
+        warnEl.style.display = "none";
+      }
+    }
+    // 自定义额度输入: 仅 t3 档位显示
+    const customRow = $("set-custom-row");
+    if (customRow) customRow.style.display = (m && m.tier === "t3") ? "flex" : "none";
+    const customInput = $("set-mainnet-custom");
+    if (customInput && m && m.custom_limit > 0) customInput.value = m.custom_limit;
     // 主网输入框: 仅在主网时显示 (便于提前填好 Key)
     const box = $("set-mainnet-box");
     if (box) box.style.display = net === "mainnet" ? "block" : "none";
   }
 
   async function switchNetwork(net) {
+    const m = settingsData.mainnet || (lastSnapshot && lastSnapshot.mainnet);
+    if (net === "mainnet" && m && !m.unlocked) {
+      alert("🔒 " + m.warning);
+      renderNetworkSettings();
+      return;
+    }
     if (net === "mainnet") {
       const ok = confirm(
         "⚠️ 即将切换到【主网 / 真实资金】模式！\n\n" +
@@ -878,6 +918,21 @@ function renderModeSettings() {
       settingsData.mainnet_configured = true;
       $("set-mainnet-key").value = "";
       $("set-mainnet-secret").value = "";
+    }
+  });
+
+  $("btn-save-mainnet-quota").addEventListener("click", async () => {
+    const limit = parseFloat($("set-mainnet-custom").value);
+    if (!limit || limit <= 0) { setMsg("请填写有效的自定义额度 (USDT)", true); return; }
+    setMsg("保存主网自定义额度中…");
+    const res = await fetch("/api/settings/mainnet-quota", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ custom_limit: limit }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
+    if (res.ok) {
+      if (settingsData.mainnet) settingsData.mainnet.custom_limit = limit;
+      renderNetworkSettings();
     }
   });
 

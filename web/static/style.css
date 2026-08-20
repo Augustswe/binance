@@ -182,11 +182,20 @@ body.modal-open { overflow: hidden; }
 .net-opt:hover { border-color: var(--blue); color: var(--text); }
 .net-opt[data-net="testnet"].active { border-color: var(--green); background: var(--green-bg); color: var(--green); }
 .net-opt[data-net="mainnet"].active { border-color: var(--red); background: var(--red-bg); color: var(--red); }
+.net-opt.disabled { opacity: .45; cursor: not-allowed; }
+.net-opt.disabled:hover { border-color: var(--border); color: var(--muted); }
 .net-mainnet-box { margin-top: 6px; }
 .net-warn {
   font-size: 12px; color: var(--red); background: var(--red-bg);
   border: 1px solid var(--red); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
 }
+.net-unlock-warn {
+  font-size: 12px; border-radius: 8px; padding: 8px 10px; margin-bottom: 6px;
+  border: 1px solid var(--border); background: var(--panel2); color: var(--muted);
+}
+.net-unlock-warn.lock { color: var(--yellow); border-color: var(--yellow); background: rgba(240,185,11,.10); }
+.net-unlock-warn.ok { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.net-unlock-warn.on-main { color: var(--red); border-color: var(--red); background: var(--red-bg); }
 
 /* 风控与敞口面板 */
 .risk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }

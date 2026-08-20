@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 
 from core.exchange import BinanceFutures
@@ -19,6 +20,11 @@ from .execution import LiveExecution, PaperExecution
 
 TIMEFRAME_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "2h": 7200,
                      "4h": 14400, "8h": 28800, "12h": 43200, "1d": 86400}
+
+# 主网分级解锁: 测试网跑满对应天数, 主网才开放并提高限额 (保护真实资金)
+# 阈值(天) 与 对应档位限额(U); 跑满90天后进入 t3, 限额改为用户自定义
+MAINNET_TIER_DAYS = (30, 60, 90)
+MAINNET_TIER_CAPS = (500.0, 1000.0)
 
 
 class TradingEngine:
@@ -82,6 +88,13 @@ class TradingEngine:
         ok = await asyncio.to_thread(self.exchange.ping)
         if not ok:
             self.log.warning("测试网连接异常, 继续尝试 (行情接口可能不可用)")
+        # 记录主网分级解锁基准 (测试网开跑起点): 仅首次写入, 之后保留
+        # (config 中的 mainnet.since 可覆盖此值, 用于回填历史起点计入已运行天数)
+        if not self.state.data.get("mainnet_baseline"):
+            self.state.data["mainnet_baseline"] = time.time()
+            self.state.save()
+            self.log.info("主网解锁基准已记录: %s",
+                          time.strftime("%Y-%m-%d %H:%M", time.localtime(self.state.data["mainnet_baseline"])))
         if self.cfg["mode"] == "live":
             self._verify_api()
             await asyncio.to_thread(self._sync_live_positions)
@@ -305,6 +318,117 @@ class TradingEngine:
             "key_masked": (key[:6] + "****" + key[-4:]) if len(key) > 12 else (key[:4] + "****" if key else ""),
         }
 
+    # ---------------- 主网分级解锁 ----------------
+    def mainnet_baseline_ts(self) -> float:
+        """测试网开跑基准时间(epoch秒): 优先用 config 的 mainnet.since (可回填历史起点),
+        否则用 state 中首次启动自动记录的 mainnet_baseline。"""
+        since = (self.cfg.get("mainnet") or {}).get("since") or 0
+        if since:
+            return float(since)
+        return float(self.state.data.get("mainnet_baseline") or 0)
+
+    def mainnet_cap_info(self) -> dict:
+        """计算主网分级解锁状态与当前限额。
+
+        档位:
+          <30天    locked  cap=0     主网入口未开放
+          30~60天  t1      cap=500U
+          60~90天  t2      cap=1000U
+          >=90天   t3      自定义(默认用 risk.max_total_position_notional)
+        返回可用于 Web 展示的 warning 文案与倒计时。
+        """
+        net = self.cfg.get("network", "testnet")
+        baseline = self.mainnet_baseline_ts()
+        now = time.time()
+        elapsed = (now - baseline) / 86400.0 if baseline else 0.0
+        elapsed_days = int(elapsed)
+        custom = float((self.cfg.get("mainnet") or {}).get("custom_limit", 0) or 0)
+
+        if elapsed < MAINNET_TIER_DAYS[0]:
+            tier, cap, unlocked = "locked", 0.0, False
+        elif elapsed < MAINNET_TIER_DAYS[1]:
+            tier, cap, unlocked = "t1", MAINNET_TIER_CAPS[0], True
+        elif elapsed < MAINNET_TIER_DAYS[2]:
+            tier, cap, unlocked = "t2", MAINNET_TIER_CAPS[1], True
+        else:
+            tier, cap, unlocked = "t3", (
+                custom if custom > 0 else float(self.cfg["risk"]["max_total_position_notional"])
+            ), True
+
+        # 下一档剩余天数 (向上取整到整天数)
+        next_days = None
+        for b in MAINNET_TIER_DAYS:
+            if elapsed < b:
+                next_days = int(math.ceil(b - elapsed))
+                break
+
+        if net != "mainnet":
+            if not unlocked:
+                warning = (f"🧪 主网入口未开放: 测试网还需跑满 {next_days} 天 "
+                           f"(满30天解锁, 限额 {MAINNET_TIER_CAPS[0]:.0f}U)")
+            else:
+                tail = f" (自定义额度未设置, 暂用 {cap:.0f}U)" if tier == "t3" and custom <= 0 else ""
+                extra = (" · 跑满60天解锁1000U" if tier == "t1"
+                         else " · 跑满90天可自定义额度" if tier == "t2" else "")
+                warning = f"💰 主网已开放: 当前档位总持仓限额 {cap:.0f}U{tail}{extra}"
+        else:
+            tail = f" (自定义额度未设置, 默认 {cap:.0f}U; 建议在设置中指定)" if tier == "t3" and custom <= 0 else ""
+            extra = (" · 跑满60天解锁1000U, 跑满90天可自定义" if tier == "t1"
+                     else " · 跑满90天可自定义额度" if tier == "t2" else "")
+            warning = f"⚠️ 主网真实资金交易中 · 当前总持仓限额 {cap:.0f}U{tail}{extra}"
+
+        return {
+            "baseline": baseline,
+            "elapsed_days": elapsed_days,
+            "tier": tier,
+            "cap": round(cap, 2),
+            "custom_limit": custom,
+            "unlocked": unlocked,
+            "next_days": next_days,
+            "warning": warning,
+        }
+
+    def _apply_mainnet_cap(self, budget: float, exposure: float):
+        """主网模式: 把开仓预算夹取到"剩余可开仓额度"内。
+
+        返回 (budget, reason|None): reason 非空表示被主网限额拦截。
+        测试网 (network!=mainnet) 原样返回, 不受此限制。
+        """
+        if self.cfg.get("network") != "mainnet":
+            return budget, None
+        info = self.mainnet_cap_info()
+        cap = info["cap"]
+        if cap <= 0:
+            return 0.0, "主网未解锁, 禁止开仓"
+        remaining = cap - exposure
+        if remaining <= 0:
+            return 0.0, f"主网总持仓已达限额 {cap:.0f}U (当前敞口 {exposure:.0f}U)"
+        return min(budget, remaining), None
+
+    def set_mainnet_custom_limit(self, limit: float) -> dict:
+        """设置主网自定义限额 (仅 t3 档位允许; 否则拒绝)。写入 config.yaml 并热生效。"""
+        info = self.mainnet_cap_info()
+        if info["tier"] != "t3":
+            return {"ok": False,
+                    "msg": f"🔒 仅跑满90天(t3)后可自定义主网额度, 当前档位 {info['tier']} (限额 {info['cap']:.0f}U)"}
+        try:
+            limit = float(limit)
+        except (TypeError, ValueError):
+            return {"ok": False, "msg": "❌ 自定义额度需为数字 (USDT)"}
+        if limit <= 0:
+            return {"ok": False, "msg": "❌ 自定义额度需为正数 (USDT)"}
+        max_total = float(self.cfg["risk"]["max_total_position_notional"])
+        if limit > max_total:
+            return {"ok": False, "msg": f"❌ 自定义额度不可超过 risk.max_total ({max_total:.0f}U)"}
+        try:
+            from core.config import update_config_mainnet
+            update_config_mainnet({"custom_limit": int(round(limit))})
+        except Exception as e:
+            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {e}"}
+        self.cfg.setdefault("mainnet", {})["custom_limit"] = limit
+        self.state.add_event("info", f"💰 主网自定义额度已设为 {limit:.0f}U")
+        return {"ok": True, "msg": f"✅ 主网自定义额度已设为 {limit:.0f}U", "custom_limit": limit}
+
     def set_network(self, network: str) -> dict:
         """热切换交易网络 (testnet/mainnet): 重建交易所客户端并落盘, 无需重启
 
@@ -313,6 +437,11 @@ class TradingEngine:
         """
         if network not in ("testnet", "mainnet"):
             return {"ok": False, "msg": "❌ network 仅支持 testnet / mainnet"}
+        # 主网分级解锁守卫: 测试网跑满30天前禁止切换 (防止误触真实资金)
+        if network == "mainnet":
+            info = self.mainnet_cap_info()
+            if not info["unlocked"]:
+                return {"ok": False, "msg": info["warning"]}
         if network == "mainnet" and not (self.cfg.get("api_mainnet", {}).get("key")
                                          and self.cfg.get("api_mainnet", {}).get("secret")):
             return {"ok": False, "msg": "❌ 主网需先在 ⚙️ 设置 填写主网 API Key/Secret (BINANCE_API_KEY/SECRET)"}
@@ -339,7 +468,7 @@ class TradingEngine:
         self.state.add_event(
             "system" if network == "testnet" else "risk",
             f"🌐 已切换交易网络 → {label}"
-            + (" ⚠️ 注意: 真实资金, 请确认风控参数" if network == "mainnet" else ""),
+            + (f" ⚠️ 真实资金, 当前主网总持仓限额 {info['cap']:.0f}U (档位 {info['tier']})" if network == "mainnet" else ""),
         )
         return {"ok": True, "msg": f"✅ 已切换至 {label}", "network": network}
 
@@ -677,6 +806,12 @@ class TradingEngine:
         )
         if budget <= 0:
             return
+        # 主网分级限额: 总持仓不得超过当前档位 cap (500/1000/自定义)
+        budget, reason = self._apply_mainnet_cap(budget, exposure)
+        if budget <= 0:
+            if reason:
+                self.log.info("[%s] 主网开仓被限额拦截: %s", symbol, reason)
+            return
         try:
             min_qty, step = await asyncio.to_thread(self.exchange.lot_size, symbol)
         except Exception as e:
@@ -939,6 +1074,12 @@ class TradingEngine:
         budget = min(margin_base * leverage * weight, max_single,
                      float(self.cfg["risk"]["max_total_position_notional"]) - exposure)
         if budget <= 0:
+            return
+        # 主网分级限额: 总持仓不得超过当前档位 cap (500/1000/自定义)
+        budget, reason = self._apply_mainnet_cap(budget, exposure)
+        if budget <= 0:
+            if reason:
+                self.log.info("[%s] 主网开仓被限额拦截: %s", symbol, reason)
             return
         try:
             min_qty, step = await asyncio.to_thread(self.exchange.lot_size, symbol)

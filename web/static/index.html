@@ -47,6 +47,7 @@
           <button class="net-opt" data-net="testnet" id="net-testnet" type="button">🧪 测试网 · 虚拟资金</button>
           <button class="net-opt" data-net="mainnet" id="net-mainnet" type="button">💰 主网 · 真实资金</button>
         </div>
+        <div class="net-unlock-warn" id="set-net-unlock" style="display:none"></div>
         <div class="net-mainnet-box" id="set-mainnet-box" style="display:none">
           <div class="net-warn">⚠️ 主网 API 与测试网完全独立, 仅用于真实账户下单。保存即写入 .env (BINANCE_API_KEY / BINANCE_API_SECRET)。</div>
           <div class="modal-row">
@@ -60,6 +61,12 @@
           <div class="modal-row">
             <button class="btn btn-ok" id="btn-save-mainnet" type="button">保存主网 API</button>
             <span class="hint">切换为主网前必须先填好主网 Key/Secret</span>
+          </div>
+          <div class="modal-row" id="set-custom-row" style="display:none">
+            <span class="modal-label">自定义限额(U)</span>
+            <input type="number" id="set-mainnet-custom" class="input mono" min="1" step="50">
+            <button class="btn btn-ok" id="btn-save-mainnet-quota" type="button">设置</button>
+            <span class="hint">仅跑满90天(t3)后可自定义主网总持仓限额</span>
           </div>
         </div>
       </div>
