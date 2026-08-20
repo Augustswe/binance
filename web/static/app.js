@@ -118,6 +118,9 @@ async function refresh() {
   lastTickTs = s.last_tick_ts || lastTickTs;
   updateHeartbeat();
 
+  // API 登录状态徽章
+  renderLoginBadge(s.api);
+
   // 按钮
   const btn = $("btn-pause");
   btn.textContent = s.paused ? "恢复" : "暂停";
@@ -329,6 +332,29 @@ function startHeartbeatTicker() {
   setInterval(updateHeartbeat, 1000);
 }
 
+// ---------------- API 登录状态徽章 ----------------
+function renderLoginBadge(api) {
+  const el = $("login-badge");
+  if (!el) return;
+  if (!api) { el.textContent = "登录 --"; el.className = "badge"; return; }
+  if (api.mode !== "live") {
+    el.textContent = "🟡 模拟模式(免登录)";
+    el.className = "badge badge-pause";
+    return;
+  }
+  if (api.verified === true) {
+    el.textContent = `🔑 已登录 ${api.key_masked}` + (api.wallet != null ? ` · ${fmt(api.wallet)}U` : "");
+    el.className = "badge badge-ok";
+  } else if (api.verified === false) {
+    el.textContent = api.configured ? "🔒 登录失败" : "🔒 未登录";
+    el.className = "badge badge-halt";
+    el.title = "API Key 无效或未配置, 点 ⚙️ 设置 配置测试网 API";
+  } else {
+    el.textContent = "⏳ 验证中…";
+    el.className = "badge";
+  }
+}
+
 function drawChart(history, dayStart) {
   const canvas = $("equity-chart");
   const dpr = window.devicePixelRatio || 1;
@@ -419,12 +445,22 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const r = await fetch("/api/settings");
       settingsData = await r.json();
-      $("set-api-status").textContent = settingsData.api_configured
-        ? `已配置 (${settingsData.api_key_masked})` : "未配置 (paper 模式无需)";
-      if (settingsData.api_configured) {
+      const api = settingsData.api || {};
+      let statusText;
+      if (api.mode !== "live") {
+        statusText = "🟡 模拟模式 (paper) - 无需登录";
+      } else if (api.verified === true) {
+        statusText = `🔑 已登录 (${api.key_masked})` + (api.wallet != null ? ` · 钱包 ${fmt(api.wallet)} U` : "");
+      } else if (api.verified === false) {
+        statusText = api.configured ? "🔒 已配置但登录失败 (Key 无效)" : "🔒 未登录 - 请填写 API Key/Secret";
+      } else {
+        statusText = "⏳ 验证中…";
+      }
+      $("set-api-status").textContent = statusText;
+      if (api.verified === true) {
         $("set-api-key").value = "";
         $("set-api-secret").value = "";
-        $("set-api-key").placeholder = settingsData.api_key_masked;
+        $("set-api-key").placeholder = api.key_masked;
       }
       renderSymbolList();
     } catch (e) {

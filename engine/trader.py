@@ -52,6 +52,9 @@ class TradingEngine:
         self._last_24h_ts = 0.0
         self._last_save_ts = 0.0
         self._last_cycle: dict[str, float] = {}
+        # API 登录状态: None=未验证 / True=已验证通过 / False=验证失败
+        self._api_verified: bool | None = None
+        self._api_wallet: float | None = None
 
         # Telegram 通知
         tcfg = cfg.get("telegram", {})
@@ -71,6 +74,7 @@ class TradingEngine:
         if not ok:
             self.log.warning("测试网连接异常, 继续尝试 (行情接口可能不可用)")
         if self.cfg["mode"] == "live":
+            self._verify_api()
             await asyncio.to_thread(self._sync_live_positions)
             await asyncio.to_thread(self._backfill_orders_from_exchange)
         self._task = asyncio.create_task(self._loop())
@@ -183,6 +187,8 @@ class TradingEngine:
             try:
                 acc = self.exchange.get_account()
                 wallet = float(acc.get("totalWalletBalance", 0.0))
+                self._api_verified = True
+                self._api_wallet = wallet
                 self.state.data["balance_cash"] = wallet
                 self.state.add_event(
                     "info",
@@ -190,11 +196,45 @@ class TradingEngine:
                 )
                 return {"ok": True, "msg": f"✅ API 已更新并通过验证, 钱包余额 {wallet:.2f} U"}
             except Exception as e:
+                self._api_verified = False
+                self._api_wallet = None
                 self.state.add_event("error", f"⚠️ API 已写入但验证失败: {str(e)[:80]}")
                 return {"ok": True, "msg": f"⚠️ API 已写入 .env, 但验证失败: {str(e)[:80]}"}
 
+        self._api_verified = None
         self.state.add_event("info", "🔑 API 已更新 (paper 模式无需验证)")
         return {"ok": True, "msg": "✅ API 已保存"}
+
+    def _verify_api(self) -> None:
+        """启动时验证 API 登录状态 (live 模式)"""
+        if self.cfg["mode"] != "live":
+            self._api_verified = None
+            return
+        if not self.cfg["api"].get("key"):
+            self._api_verified = False
+            self._api_wallet = None
+            self.log.warning("live 模式未配置 API Key, 无法登录测试网")
+            return
+        try:
+            acc = self.exchange.get_account()
+            self._api_verified = True
+            self._api_wallet = float(acc.get("totalWalletBalance", 0.0))
+            self.log.info("API 登录验证通过, 钱包余额 %.2f U", self._api_wallet)
+        except Exception as e:
+            self._api_verified = False
+            self._api_wallet = None
+            self.log.error("API 登录验证失败: %s", str(e)[:100])
+
+    def api_status(self) -> dict:
+        """API 登录状态 (供 Web 展示): verified True=已登录 / False=未登录 / None=无需"""
+        key = self.cfg["api"].get("key", "")
+        return {
+            "mode": self.cfg["mode"],
+            "configured": bool(key),
+            "verified": self._api_verified,
+            "wallet": self._api_wallet,
+            "key_masked": (key[:6] + "****" + key[-4:]) if len(key) > 12 else (key[:4] + "****" if key else ""),
+        }
 
     # ---------------- 主循环 ----------------
     async def _loop(self):

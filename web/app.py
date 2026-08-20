@@ -41,7 +41,9 @@ def create_app(engine) -> FastAPI:
 
     @app.get("/api/state")
     async def api_state():
-        return engine.get_snapshot()
+        snap = engine.get_snapshot()
+        snap["api"] = engine.api_status()   # 登录状态徽章用
+        return snap
 
     @app.get("/api/config")
     async def api_config():
@@ -91,9 +93,8 @@ def create_app(engine) -> FastAPI:
     # ---------------- 设置面板 ----------------
     @app.get("/api/settings")
     async def api_settings():
-        """返回设置面板需要的数据: 当前币种 + API 状态 + 可用币种候选"""
+        """返回设置面板需要的数据: 当前币种 + API 登录状态 + 可用币种候选"""
         cfg = engine.cfg
-        api_key = cfg["api"].get("key", "")
         try:
             candidates = engine.exchange.search_symbols("", limit=200)
         except Exception as e:
@@ -101,8 +102,7 @@ def create_app(engine) -> FastAPI:
         return {
             "mode": cfg["mode"],
             "symbols": list(cfg["symbols"]),
-            "api_configured": bool(api_key),
-            "api_key_masked": (api_key[:6] + "****" + api_key[-4:]) if len(api_key) > 12 else "",
+            "api": engine.api_status(),
             "candidates": [c["symbol"] for c in candidates],
             "has_positions": list(engine.state.data["positions"].keys()),
         }
