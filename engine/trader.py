@@ -116,6 +116,86 @@ class TradingEngine:
     def get_snapshot(self) -> dict:
         return self.state.snapshot()
 
+    # ---------------- Web 设置面板: 热更新 ----------------
+    def update_symbols(self, symbols: list[str]) -> dict:
+        """热更新交易对列表 (Web 设置面板): 写 config.yaml + 更新内存
+
+        - 已有持仓的交易对禁止移除 (需先平仓)
+        - 更新后立即生效, 重启后依然保留
+        """
+        symbols = [s.strip().upper() for s in symbols if s.strip()]
+        # 去重保序
+        seen, dedup = set(), []
+        for s in symbols:
+            if s not in seen:
+                seen.add(s)
+                dedup.append(s)
+        symbols = dedup
+
+        old = set(self.symbols)
+        new = set(symbols)
+        removed = old - new
+        positions = set(self.state.data["positions"].keys())
+        blocked = removed & positions
+        if blocked:
+            return {
+                "ok": False,
+                "msg": f"❌ 以下交易对仍有持仓, 无法移除: {', '.join(sorted(blocked))} (请先平仓)",
+            }
+
+        from core.config import update_config_symbols
+
+        try:
+            update_config_symbols(symbols)
+        except Exception as e:
+            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {e}"}
+
+        self.symbols = symbols
+        self.cfg["symbols"] = symbols
+        added = new - old
+        self.state.add_event(
+            "info",
+            f"⚙️ 交易对已更新: {'+'.join(sorted(added)) or '无新增'} "
+            f"{'/-'.join(sorted(removed)) or ''} | 共{len(symbols)}个",
+        )
+        self.state.save()
+        self.log.info("交易对更新: %s", symbols)
+        return {"ok": True, "symbols": symbols, "added": sorted(added), "removed": sorted(removed)}
+
+    def update_api(self, key: str, secret: str) -> dict:
+        """热更新测试网 API Key/Secret (Web 设置面板): 写 .env + 更新内存
+
+        live 模式下用新凭据立即验证一次账户接口
+        """
+        key, secret = key.strip(), secret.strip()
+        from core.config import update_env_api
+
+        try:
+            update_env_api(key, secret)
+        except Exception as e:
+            return {"ok": False, "msg": f"❌ 写入 .env 失败: {e}"}
+
+        self.exchange.set_credentials(key, secret)
+        self.cfg["api"]["key"] = key
+        self.cfg["api"]["secret"] = secret
+
+        if self.cfg["mode"] == "live":
+            try:
+                acc = self.exchange.get_account()
+                wallet = float(acc.get("totalWalletBalance", 0.0))
+                self.state.data["balance_cash"] = wallet
+                self.state.add_event(
+                    "info",
+                    f"🔑 API 已更新并通过验证 | 钱包余额 {wallet:.2f} U",
+                )
+                return {"ok": True, "msg": f"✅ API 已更新并通过验证, 钱包余额 {wallet:.2f} U"}
+            except Exception as e:
+                self.state.add_event("error", f"⚠️ API 已写入但验证失败: {str(e)[:80]}")
+                return {"ok": True, "msg": f"⚠️ API 已写入 .env, 但验证失败: {str(e)[:80]}"}
+
+        self.state.add_event("info", "🔑 API 已更新 (paper 模式无需验证)")
+        return {"ok": True, "msg": "✅ API 已保存"}
+
     # ---------------- 主循环 ----------------
     async def _loop(self):
         while not self._stop.is_set():

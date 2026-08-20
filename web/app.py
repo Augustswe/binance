@@ -15,6 +15,15 @@ class ControlBody(BaseModel):
     action: str
 
 
+class ApiBody(BaseModel):
+    api_key: str = ""
+    api_secret: str = ""
+
+
+class SymbolsBody(BaseModel):
+    symbols: list[str]
+
+
 def create_app(engine) -> FastAPI:
     app = FastAPI(title="Binance 测试网量化仪表盘", docs_url=None, redoc_url=None)
 
@@ -78,6 +87,42 @@ def create_app(engine) -> FastAPI:
     @app.post("/api/control")
     async def api_control(body: ControlBody):
         return engine.control(body.action)
+
+    # ---------------- 设置面板 ----------------
+    @app.get("/api/settings")
+    async def api_settings():
+        """返回设置面板需要的数据: 当前币种 + API 状态 + 可用币种候选"""
+        cfg = engine.cfg
+        api_key = cfg["api"].get("key", "")
+        try:
+            candidates = engine.exchange.search_symbols("", limit=200)
+        except Exception as e:
+            candidates = []
+        return {
+            "mode": cfg["mode"],
+            "symbols": list(cfg["symbols"]),
+            "api_configured": bool(api_key),
+            "api_key_masked": (api_key[:6] + "****" + api_key[-4:]) if len(api_key) > 12 else "",
+            "candidates": [c["symbol"] for c in candidates],
+            "has_positions": list(engine.state.data["positions"].keys()),
+        }
+
+    @app.get("/api/symbols/search")
+    async def api_symbols_search(q: str = "", limit: int = 50):
+        """按名称模糊搜索可交易币种 (如 q=btc → BTCUSDT)"""
+        try:
+            res = engine.exchange.search_symbols(q, limit=int(limit))
+        except Exception as e:
+            return {"error": str(e), "results": []}
+        return {"results": res}
+
+    @app.post("/api/settings/api")
+    async def api_settings_api(body: ApiBody):
+        return engine.update_api(body.api_key, body.api_secret)
+
+    @app.post("/api/settings/symbols")
+    async def api_settings_symbols(body: SymbolsBody):
+        return engine.update_symbols(body.symbols)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

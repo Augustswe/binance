@@ -406,6 +406,116 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
   });
+
+  // ---------------- 设置面板 ----------------
+  let settingsData = { symbols: [], has_positions: [], candidates: [] };
+  const setMsg = (text, isErr = false) => {
+    const el = $("set-msg");
+    el.textContent = text || "";
+    el.style.color = isErr ? "var(--red)" : "var(--green)";
+  };
+
+  async function loadSettings() {
+    try {
+      const r = await fetch("/api/settings");
+      settingsData = await r.json();
+      $("set-api-status").textContent = settingsData.api_configured
+        ? `已配置 (${settingsData.api_key_masked})` : "未配置 (paper 模式无需)";
+      if (settingsData.api_configured) {
+        $("set-api-key").value = "";
+        $("set-api-secret").value = "";
+        $("set-api-key").placeholder = settingsData.api_key_masked;
+      }
+      renderSymbolList();
+    } catch (e) {
+      setMsg("❌ 加载设置失败: " + e, true);
+    }
+  }
+
+  function renderSymbolList() {
+    const box = $("set-symbol-list");
+    const positions = new Set(settingsData.has_positions || []);
+    if (!settingsData.symbols.length) {
+      box.innerHTML = `<span class="hint">暂无交易对</span>`;
+      return;
+    }
+    box.innerHTML = settingsData.symbols.map(sym => {
+      const locked = positions.has(sym);
+      return `<span class="chip ${locked ? "chip-locked" : ""}" title="${locked ? "有持仓, 需先平仓" : "点击移除"}">
+        <b>${sym}</b>${locked ? " 🔒" : `<span class="x" data-sym="${sym}">✕</span>`}
+      </span>`;
+    }).join("");
+    box.querySelectorAll(".x").forEach(el => {
+      el.addEventListener("click", async () => {
+        const sym = el.dataset.sym;
+        const next = settingsData.symbols.filter(s => s !== sym);
+        const res = await fetch("/api/settings/symbols", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbols: next }),
+        }).then(r => r.json());
+        setMsg(res.msg || (res.ok ? "✅ 已移除 " + sym : "操作失败"), !res.ok);
+        if (res.ok) { settingsData.symbols = res.symbols; renderSymbolList(); }
+      });
+    });
+  }
+
+  async function doSearch() {
+    const q = $("set-symbol-search").value.trim();
+    const box = $("set-search-results");
+    if (!q) { box.innerHTML = `<span class="hint">输入关键词搜索币种</span>`; return; }
+    box.innerHTML = `<span class="hint">搜索中…</span>`;
+    try {
+      const r = await fetch("/api/symbols/search?q=" + encodeURIComponent(q) + "&limit=30");
+      const d = await r.json();
+      const results = (d.results || []).filter(x => !settingsData.symbols.includes(x.symbol));
+      if (!results.length) {
+        box.innerHTML = `<span class="hint">未找到匹配的币种 (或已在列表中)</span>`;
+        return;
+      }
+      box.innerHTML = results.map(x => `<span class="chip chip-add" data-sym="${x.symbol}" title="点击添加">+ ${x.symbol}</span>`).join("");
+      box.querySelectorAll(".chip-add").forEach(el => {
+        el.addEventListener("click", async () => {
+          const sym = el.dataset.sym;
+          const next = [...settingsData.symbols, sym];
+          const res = await fetch("/api/settings/symbols", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbols: next }),
+          }).then(r => r.json());
+          setMsg(res.msg || (res.ok ? "✅ 已添加 " + sym : "操作失败"), !res.ok);
+          if (res.ok) { settingsData.symbols = res.symbols; renderSymbolList(); doSearch(); }
+        });
+      });
+    } catch (e) {
+      box.innerHTML = `<span class="hint">搜索失败: ${e}</span>`;
+    }
+  }
+
+  $("btn-settings").addEventListener("click", () => {
+    $("settings-modal").style.display = "flex";
+    setMsg("");
+    loadSettings();
+  });
+  $("btn-settings-close").addEventListener("click", () => {
+    $("settings-modal").style.display = "none";
+  });
+  $("settings-modal").addEventListener("click", (e) => {
+    if (e.target.id === "settings-modal") $("settings-modal").style.display = "none";
+  });
+  $("btn-symbol-search").addEventListener("click", doSearch);
+  $("set-symbol-search").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+  $("btn-save-api").addEventListener("click", async () => {
+    const key = $("set-api-key").value.trim();
+    const secret = $("set-api-secret").value.trim();
+    if (!key && !secret) { setMsg("请填写 API Key 和 Secret", true); return; }
+    setMsg("保存中…");
+    const res = await fetch("/api/settings/api", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: key, api_secret: secret }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
+    loadSettings();
+  });
+
   window.addEventListener("resize", () => {
     if (lastSnapshot) drawChart(lastSnapshot.equity_history, lastSnapshot.day_start_equity);
   });

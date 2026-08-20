@@ -2,12 +2,72 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def update_config_symbols(symbols: list[str]) -> None:
+    """更新 config.yaml 的 symbols 列表 (文本级替换, 保留注释)
+
+    Web 设置面板添加/删除币种时调用, 重启后依然生效。
+    """
+    path = BASE_DIR / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+
+    # 找到 "symbols:" 顶层键, 替换其后到下一个顶层键之间的列表项
+    out: list[str] = []
+    i = 0
+    replaced = False
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^symbols:\s*$", line)
+        if m and not replaced:
+            out.append(line)
+            i += 1
+            # 跳过旧的列表项
+            while i < len(lines) and re.match(r"^\s+-\s+", lines[i]):
+                i += 1
+            # 写入新列表
+            for sym in symbols:
+                out.append(f"  - {sym}")
+            replaced = True
+            continue
+        out.append(line)
+        i += 1
+
+    if not replaced:
+        raise ValueError("config.yaml 中未找到 symbols: 段, 无法更新")
+
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def update_env_api(key: str, secret: str) -> None:
+    """更新 .env 中的测试网 API Key/Secret (保留其他配置与注释)"""
+    env_path = BASE_DIR / ".env"
+    text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    lines = text.split("\n")
+    out: list[str] = []
+    k_set = s_set = False
+    for line in lines:
+        if line.startswith("BINANCE_TESTNET_API_KEY="):
+            out.append(f"BINANCE_TESTNET_API_KEY={key}")
+            k_set = True
+        elif line.startswith("BINANCE_TESTNET_API_SECRET="):
+            out.append(f"BINANCE_TESTNET_API_SECRET={secret}")
+            s_set = True
+        else:
+            out.append(line)
+    if not k_set:
+        out.append(f"BINANCE_TESTNET_API_KEY={key}")
+    if not s_set:
+        out.append(f"BINANCE_TESTNET_API_SECRET={secret}")
+    env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
 def _merge_tuned(cfg: dict) -> None:

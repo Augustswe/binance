@@ -117,3 +117,43 @@ canvas#equity-chart { width: 100%; display: block; }
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: .35; transform: scale(.8); }
 }
+
+/* ---------------- 设置弹窗 ---------------- */
+.modal-mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+}
+.modal {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  width: 560px; max-width: 94vw; max-height: 86vh; display: flex; flex-direction: column;
+}
+.modal-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; font-weight: 600; border-bottom: 1px solid var(--border);
+}
+.modal-body { padding: 16px 18px; overflow-y: auto; }
+.modal-sec { margin-bottom: 12px; }
+.modal-sec-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
+.modal-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.modal-label { width: 110px; color: var(--muted); font-size: 13px; flex-shrink: 0; }
+.input {
+  flex: 1; min-width: 220px; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px;
+}
+.input:focus { outline: none; border-color: var(--blue); }
+.modal-hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+.modal-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 14px;
+  font-size: 13px; cursor: pointer; user-select: none;
+}
+.chip:hover { border-color: var(--blue); }
+.chip .x { color: var(--muted); font-weight: 700; }
+.chip .x:hover { color: var(--red); }
+.chip-add { border-color: var(--green); color: var(--green); }
+.chip-add:hover { background: var(--green-bg); }
+.chip-locked { opacity: .5; cursor: not-allowed; }
+.modal-msg { margin-top: 10px; font-size: 13px; min-height: 18px; word-break: break-all; }
+.btn-ok { background: var(--green); color: #fff; border: none; }
+.btn-ok:hover { filter: brightness(1.1); }

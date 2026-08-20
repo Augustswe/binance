@@ -37,6 +37,12 @@ class BinanceFutures:
         self.session = requests.Session()
         self._info_cache: dict[str, Any] | None = None
 
+    def set_credentials(self, key: str, secret: str) -> None:
+        """热更新 API Key/Secret (Web 设置面板调用, 无需重启)"""
+        self.api_key = key.strip()
+        self.api_secret = secret.strip()
+        self.log.info("API 凭据已热更新 (key=%s...)", self.api_key[:6] if self.api_key else "")
+
     # ---------------- 基础请求 ----------------
     def _public(self, method: str, path: str, **params) -> Any:
         url = self.base_url + path
@@ -174,6 +180,35 @@ class BinanceFutures:
         if self._info_cache is None:
             self._info_cache = self._public("GET", "/fapi/v1/exchangeInfo")
         return self._info_cache
+
+    def search_symbols(self, query: str = "", limit: int = 50) -> list[dict]:
+        """搜索可交易的 USDT 永续合约交易对 (按名称模糊匹配)
+
+        返回 [{symbol, base, quote, status}], 用于 Web 设置面板添加币种。
+        """
+        info = self.get_exchange_info()
+        out = []
+        q = query.strip().upper()
+        for s in info.get("symbols", []):
+            sym = s.get("symbol", "")
+            # 只看 USDT 计价合约
+            if not sym.endswith("USDT") and s.get("quoteAsset") != "USDT":
+                continue
+            if s.get("contractType") not in ("PERPETUAL", None, ""):
+                continue
+            if s.get("status") not in ("TRADING", None, ""):
+                continue
+            if q and q not in sym:
+                continue
+            out.append({
+                "symbol": sym,
+                "base": s.get("baseAsset", ""),
+                "quote": s.get("quoteAsset", ""),
+                "status": s.get("status", ""),
+            })
+            if len(out) >= limit:
+                break
+        return out
 
     def lot_size(self, symbol: str) -> tuple[float, float]:
         """返回 (minQty, stepSize)"""
