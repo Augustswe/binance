@@ -157,3 +157,10 @@ canvas#equity-chart { width: 100%; display: block; }
 .modal-msg { margin-top: 10px; font-size: 13px; min-height: 18px; word-break: break-all; }
 .btn-ok { background: var(--green); color: #fff; border: none; }
 .btn-ok:hover { filter: brightness(1.1); }
+.mode-check {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; cursor: pointer; user-select: none;
+}
+.mode-check:hover { border-color: var(--blue); }
+.mode-check.on { border-color: var(--green); background: var(--green-bg); color: var(--green); }

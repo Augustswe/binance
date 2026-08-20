@@ -47,6 +47,38 @@ def update_config_symbols(symbols: list[str]) -> None:
     path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def update_config_modes(modes: list[str]) -> None:
+    """更新 config.yaml 的 modes.enabled 列表 (文本级替换, 保留注释)"""
+    path = BASE_DIR / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+
+    out: list[str] = []
+    i = 0
+    replaced = False
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^modes:\s*$", line)
+        if m and not replaced:
+            out.append(line)
+            i += 1
+            # 跳过旧的 enabled 列表项
+            while i < len(lines) and re.match(r"^\s+enabled:\s*\[", lines[i]):
+                i += 1
+                while i < len(lines) and re.match(r"^\s+-\s+", lines[i]):
+                    i += 1
+            out.append(f"  enabled: [{', '.join(modes)}]")
+            replaced = True
+            continue
+        out.append(line)
+        i += 1
+
+    if not replaced:
+        raise ValueError("config.yaml 中未找到 modes: 段, 无法更新")
+
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
 def update_env_api(key: str, secret: str) -> None:
     """更新 .env 中的测试网 API Key/Secret (保留其他配置与注释)"""
     env_path = BASE_DIR / ".env"

@@ -5,7 +5,8 @@ import asyncio
 import time
 
 from core.exchange import BinanceFutures
-from core.learner import default_combo, learn, load_current_combo
+from core.learner import (default_combo, learn, learn_mode_weights,
+                          load_current_combo, load_mode_weights)
 from core.logger import get_logger
 from core.notify import Notifier
 from core.orders import rebuild_from_user_trades
@@ -28,16 +29,24 @@ class TradingEngine:
         self.exchange = BinanceFutures(cfg)
         self.risk = RiskManager(cfg)
         self.strategy_engine = StrategyEngine(cfg)
-        # 策略模式: multi=多策略自适应评分 | donchian=通道突破趋势跟踪
+        # 策略模式: 支持多模式并行 (donchian/multi/grid/ma_cross/rsi/bollinger)
         self.strategy_mode = cfg.get("strategy_mode", "multi")
-        self.donchian = DonchianEngine(cfg) if self.strategy_mode == "donchian" else None
+        from strategies.modes import ModeManager
+
+        self.modes = ModeManager(cfg)
+        self.enabled_modes = self.modes.enabled
+        self.donchian = self.modes.donchian  # 兼容旧代码引用
+        # 加载模式学习器学到的资金权重 (按实盘表现分配)
+        learned_w = load_mode_weights()
+        if learned_w:
+            self.modes.update_weights(learned_w)
         # 自动学习进化器: 加载上次学习到的最优组合, 启动后立即学一轮, 之后每天学
         self.timeframe = cfg["timeframe"]   # 先取配置默认, 学习器组合会覆盖
         lcfg = cfg.get("learner", {})
-        self.learner_enabled = bool(lcfg.get("enabled", True)) and self.strategy_mode == "donchian"
+        self.learner_enabled = bool(lcfg.get("enabled", True)) and "donchian" in self.enabled_modes
         self.learner_days = int(lcfg.get("days", 90))
         self.learner_interval = float(lcfg.get("interval_hours", 24)) * 3600
-        if self.strategy_mode == "donchian":
+        if "donchian" in self.enabled_modes:
             combo = load_current_combo() or default_combo()
             self._apply_combo(combo, announce=False)   # 覆盖 self.timeframe/_tf_seconds
         self._last_learn_ts = 0.0  # 启动后立即学一轮
@@ -63,7 +72,7 @@ class TradingEngine:
         )
         # AI 自动调参 (仅 multi 模式适用; donchian 模式禁用)
         tun = cfg.get("tuning", {})
-        self.tuning_enabled = bool(tun.get("enabled", False)) and self.strategy_mode == "multi"
+        self.tuning_enabled = bool(tun.get("enabled", False)) and "multi" in self.enabled_modes
         self.tuning_interval = float(tun.get("interval_hours", 6)) * 3600
         self.tuning_cfg = tun
         self._last_tune_ts = time.time()  # 启动后先跑一个周期再调参
@@ -375,7 +384,7 @@ class TradingEngine:
     def _cycle_due(self, symbol: str) -> bool:
         last = self._last_cycle.get(symbol, 0.0)
         # donchian 模式: 每5分钟检测一次通道突破, 防止突破发生却被延迟到下一根K线才入场
-        interval = 300 if self.strategy_mode == "donchian" else self._tf_seconds
+        interval = 300 if "donchian" in self.enabled_modes else self._tf_seconds
         return (time.time() - last) >= interval
 
     # ---------------- 止盈止损 ----------------
@@ -393,20 +402,20 @@ class TradingEngine:
             atr = sig.get("atr") or 0.0
             sign = 1.0 if pos["side"] == "LONG" else -1.0
             need_sl = not pos.get("sl")
-            need_tp = self.strategy_mode != "donchian" and not pos.get("tp")
+            need_tp = pos.get("mode") != "donchian" and not pos.get("tp")
             if (need_sl or need_tp) and atr and atr > 0:
                 if need_tp:
                     pos["tp"] = pos["entry"] + sign * tp_atr * atr
                 if need_sl:
-                    d_sl = self.donchian.sl_atr if self.strategy_mode == "donchian" else sl_atr
+                    d_sl = (self.donchian.sl_atr if self.donchian else sl_atr) if pos.get("mode") == "donchian" else sl_atr
                     pos["sl"] = pos["entry"] - sign * d_sl * atr
                 self.log.info("[%s] 补算止损 SL=%.2f", sym, pos["sl"])
                 self.state.add_event("info", f"🛡 {sym} 补算止损 SL={pos['sl']:.2f}")
                 # 补算后立即把止损下到交易所
                 await self._place_exchange_stop(sym, pos)
 
-            # ---- 移动止损 (trailing stop): donchian 模式, 随新高/新低锁浮盈 ----
-            if self.strategy_mode == "donchian":
+            # ---- 移动止损 (trailing stop): 仅 donchian 模式持仓, 随新高/新低锁浮盈 ----
+            if pos.get("mode") == "donchian":
                 await self._update_trailing_stop(sym, pos, p, atr)
 
             if pos["side"] == "LONG":
@@ -547,58 +556,48 @@ class TradingEngine:
             return
 
         d = self.state.data
-        pos = d["positions"].get(symbol)
         mark = d["mark_prices"].get(symbol) or d["prices"].get(symbol)
         if not mark or mark <= 0:
             return
 
-        # ============ Donchian 模式: 通道突破趋势跟踪 ============
-        if self.strategy_mode == "donchian":
-            sig = self.donchian.analyze(symbol, klines)
+        # ============ 多模式并行: 每个启用模式独立分析/开仓 ============
+        # 同币种竞争制: 该币种已有任何模式的持仓 → 只做该持仓的出场管理, 不再开新仓
+        pos = d["positions"].get(symbol)
+        for mode in self.enabled_modes:
+            sig = self.modes.analyze(mode, symbol, klines, price=mark)
             if sig is None:
-                return
-            d["signals"][symbol] = sig.to_dict()
+                continue
+            d["signals"][f"{mode}:{symbol}"] = sig.to_dict()
             if not pos:
+                # 无持仓: 开仓 (信号触发且通过风控)
                 if sig.action == "LONG":
-                    await self._try_open_donchian(symbol, "LONG", mark, sig)
+                    await self._try_open_mode(mode, symbol, "LONG", mark, sig)
                 elif sig.action == "SHORT":
-                    await self._try_open_donchian(symbol, "SHORT", mark, sig)
+                    await self._try_open_mode(mode, symbol, "SHORT", mark, sig)
+                # 开仓成功则其他模式不再抢同币种
+                if d["positions"].get(symbol):
+                    break
             else:
-                # 通道反向突破 → 平仓 (让利润奔跑, 无固定止盈)
-                if self.donchian.check_exit(klines, pos):
-                    trade = await self.execution.close_position(symbol, mark, "通道反向出场")
-                    if trade:
-                        await self._notify_close(trade)
-            return
-
-        # ============ multi 模式: 多策略自适应评分 ============
-        result = self.strategy_engine.analyze(symbol, klines)
-        if result is None:
-            return
-        d["signals"][symbol] = result.to_dict()
-        open_th = float(self.cfg["signal"]["open_threshold"])
-        close_th = float(self.cfg["signal"]["close_threshold"])
-
-        if not pos:
-            # trend_only: 只在趋势市顺势开仓 (trend_up只做多, trend_down只做空, 震荡市不开)
-            trend_only = bool(self.cfg.get("signal", {}).get("trend_only", False))
-            can_long = (not trend_only) or result.regime == "trend_up"
-            can_short = (not trend_only) or result.regime == "trend_down"
-            if result.combined >= open_th and can_long:
-                await self._try_open(symbol, "LONG", mark, result)
-            elif result.combined <= -open_th and can_short:
-                await self._try_open(symbol, "SHORT", mark, result)
-        else:
-            # close_threshold <= 0 表示禁用"信号消失"平仓, 只靠止盈止损离场
-            if close_th > 0:
-                if pos["side"] == "LONG" and result.combined < close_th:
-                    trade = await self.execution.close_position(symbol, mark, "信号消失")
-                    if trade:
-                        await self._notify_close(trade)
-                elif pos["side"] == "SHORT" and result.combined > -close_th:
-                    trade = await self.execution.close_position(symbol, mark, "信号消失")
-                    if trade:
-                        await self._notify_close(trade)
+                # 有持仓: 出场管理 (donchian 走通道反向; 其他模式走信号消失)
+                pos_mode = pos.get("mode", "donchian")
+                if mode == pos_mode:
+                    if mode == "donchian" and self.donchian:
+                        if self.donchian.check_exit(klines, pos):
+                            trade = await self.execution.close_position(symbol, mark, "通道反向出场")
+                            if trade:
+                                await self._notify_close(trade)
+                    elif mode != "donchian":
+                        close_th = float(self.cfg["signal"].get("close_threshold", 0.0))
+                        if close_th > 0:
+                            if pos["side"] == "LONG" and sig.score < close_th:
+                                trade = await self.execution.close_position(symbol, mark, "信号消失")
+                                if trade:
+                                    await self._notify_close(trade)
+                            elif pos["side"] == "SHORT" and sig.score > -close_th:
+                                trade = await self.execution.close_position(symbol, mark, "信号消失")
+                                if trade:
+                                    await self._notify_close(trade)
+                break  # 有持仓时只处理持有该仓的模式
 
     async def _try_open(self, symbol: str, side: str, price: float, result):
         d = self.state.data
@@ -850,22 +849,25 @@ class TradingEngine:
         self.strategy_engine = StrategyEngine(self.cfg)
         self.log.info("新策略参数已生效: signal=%s position=%s", self.cfg["signal"], self.cfg["position"])
 
-    async def _try_open_donchian(self, symbol: str, side: str, price: float, sig):
-        """Donchian 模式开仓: 只设 ATR 止损, 无固定止盈 (让利润奔跑, 通道反向出场)
+    async def _try_open_mode(self, mode: str, symbol: str, side: str, price: float, sig):
+        """通用开仓: 支持所有模式
 
-        动态杠杆: 强信号(突破深)高倍开单 → 名义仓位大; 弱信号低倍试错 → 小仓位
-        保证金预算固定, 名义价值 = 保证金 × 杠杆
+        - donchian: 只设 ATR 止损, 无固定止盈 (移动止损锁利, 通道反向出场)
+        - 其他模式: 固定 TP/SL (ATR 倍数)
+        - 资金权重: 模式学习器按实盘表现分配的权重, 权重高仓位大
+        - 动态杠杆: 强信号高倍, 弱信号低倍
         """
         d = self.state.data
         exposure = self.state.exposure()
         leverage = max(1, int(getattr(sig, "leverage", 1)))
-        lev_max = getattr(self.donchian, "lev_max", 5) if self.donchian else 5
+        lev_max = 5
+        weight = self.modes.weight_of(mode)
         max_single = float(self.cfg["risk"]["max_single_order_notional"])
         margin_base = float(self.cfg["risk"].get(
             "margin_per_position", max_single / max(1, lev_max)
         ))
-        # 名义价值 = 保证金 × 杠杆 (受单笔上限与总敞口上限约束)
-        budget = min(margin_base * leverage, max_single,
+        # 名义价值 = 保证金 × 杠杆 × 模式权重
+        budget = min(margin_base * leverage * weight, max_single,
                      float(self.cfg["risk"]["max_total_position_notional"]) - exposure)
         if budget <= 0:
             return
@@ -882,24 +884,41 @@ class TradingEngine:
         if not ok:
             self.state.add_event("info", f"🛡 {symbol} 开仓被风控拒绝({side}): {reason}")
             return
-        sl = sig.sl if side == "LONG" else sig.sl
+
+        sign = 1.0 if side == "LONG" else -1.0
+        if mode == "donchian":
+            # 只设 ATR 止损, 无固定止盈 (移动止损/通道反向出场)
+            sl = sig.sl if sig.sl and sig.sl > 0 else price - sign * sig.sl_atr * sig.atr
+            tp = None
+        else:
+            # 固定 TP/SL (ATR 倍数, 带最小距离防手续费吃掉)
+            pos_cfg = self.cfg.get("position", {})
+            min_tp = price * float(pos_cfg.get("min_tp_pct", 0.0025))
+            min_sl = price * float(pos_cfg.get("min_sl_pct", 0.0015))
+            tp_atr = sig.tp_atr or float(pos_cfg.get("tp_atr", 2.0))
+            sl_atr = sig.sl_atr or float(pos_cfg.get("sl_atr", 1.5))
+            tp = price + sign * max(tp_atr * sig.atr, min_tp)
+            sl = price - sign * max(sl_atr * sig.atr, min_sl)
+
+        strategy = f"{mode}-{sig.regime}"
         ok = await self.execution.open_position(
-            symbol, side, qty, price, leverage, notional, None, sl, sig.atr, f"donchian-{sig.regime}"
+            symbol, side, qty, price, leverage, notional, tp, sl, sig.atr, strategy
         )
         if ok:
+            mode_label = {"donchian": "Donchian", "multi": "多策略", "grid": "网格",
+                          "ma_cross": "均线", "rsi": "RSI", "bollinger": "布林带"}.get(mode, mode)
             self.state.add_event(
                 "trade",
-                f"🟢 Donchian开仓 {symbol} {'做多' if side == 'LONG' else '做空'} "
+                f"🟢 [{mode_label}] 开仓 {symbol} {'做多' if side == 'LONG' else '做空'} "
                 f"{qty} @ {price:.2f} | 杠杆 {leverage}x | 强度 {sig.strength:.2f} | "
-                f"突破通道 | 止损 {sl:.2f}",
+                f"权重 {weight:.1f}x | 止损 {sl:.2f}" + (f" | 止盈 {tp:.2f}" if tp else " | 移动止损"),
             )
             await self._notify(
-                f"🟢 Donchian 开仓 {symbol}\n"
+                f"🟢 [{mode_label}] 开仓 {symbol}\n"
                 f"方向: {'做多' if side == 'LONG' else '做空'}\n"
                 f"数量: {qty} | 价格: {price:.2f}\n"
-                f"杠杆: {leverage}x (信号强度 {sig.strength:.2f})\n"
-                f"止损: {sl:.2f} (ATR)\n"
-                f"出场: 通道反向突破, 无固定止盈"
+                f"杠杆: {leverage}x | 信号强度: {sig.strength:.2f} | 权重: {weight:.1f}x\n"
+                f"止损: {sl:.2f}" + (f"\n止盈: {tp:.2f}" if tp else "\n出场: 移动止损/通道反向")
             )
 
     # ---------------- 自动学习进化 ----------------
@@ -960,3 +979,21 @@ class TradingEngine:
                 f"近{self.learner_days}天收益{best['avg_ret']:+.2f}% 回撤{best['avg_dd']:.2f}%",
             )
             self.log.info("自动学习: 保持最优组合 %s (评分%.2f)", best["key"], best["score"])
+
+        # ---- 多模式: 按实盘表现更新资金权重 (赚钱的多给资金) ----
+        if len(self.enabled_modes) > 1:
+            try:
+                mode_stats = self.state.data.get("mode_stats", {})
+                weights = learn_mode_weights(mode_stats, enabled=self.enabled_modes)
+                if weights:
+                    old_w = dict(self.modes.weights)
+                    self.modes.update_weights(weights)
+                    self.state.add_event(
+                        "tuning",
+                        "🎯 模式资金权重更新: " + " | ".join(
+                            f"{m}={self.modes.weights.get(m, 1.0):.2f}x" for m in self.enabled_modes
+                        ),
+                    )
+                    self.log.info("模式资金权重已更新: %s", self.modes.weights)
+            except Exception as e:
+                self.log.error("模式权重学习失败: %s", e)

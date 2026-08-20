@@ -59,6 +59,7 @@ class TradingState:
                 "realized_pnl": 0.0,
                 "fees_paid": 0.0,
             },
+            "mode_stats": {},             # 按策略模式统计: mode -> {trades/wins/pnl/fees}
         }
         self._load()
 
@@ -70,7 +71,7 @@ class TradingState:
                     saved = json.load(f)
                 for k in ("positions", "trades", "orders", "equity_history", "balance_cash",
                           "day_start_equity", "day_date", "day_start_initialized",
-                          "strategy_stats", "last_close_time", "events"):
+                          "strategy_stats", "mode_stats", "last_close_time", "events"):
                     if k in saved:
                         self.data[k] = saved[k]
                 # 同一天重启: 保留今日起始权益 (今日盈亏跨重启连续, 不归零)
@@ -156,6 +157,20 @@ class TradingState:
     def day_pnl(self) -> float:
         return self.equity() - self.data["day_start_equity"]
 
+    def _mode_stats_out(self) -> dict:
+        """按模式统计 (带胜率), 供多模式对比面板"""
+        out = {}
+        for mode, ms in self.data.get("mode_stats", {}).items():
+            wr = ms["wins"] / ms["total_trades"] * 100 if ms["total_trades"] else 0.0
+            out[mode] = {
+                "total_trades": ms["total_trades"],
+                "wins": ms["wins"],
+                "win_rate": round(wr, 1),
+                "realized_pnl": round(ms["realized_pnl"], 2),
+                "fees_paid": round(ms["fees_paid"], 2),
+            }
+        return out
+
     def exposure(self) -> float:
         """全部持仓名义价值"""
         return sum(p["notional"] for p in self.data["positions"].values())
@@ -183,6 +198,7 @@ class TradingState:
                 "sl": sl,
                 "atr": atr,
                 "strategy": strategy,
+                "mode": strategy.split("-")[0] if "-" in strategy else strategy,
                 "opened_at": time.time(),
                 "high": entry,             # 移动止损: 持仓期间最高价 (从入场价起算)
                 "low": entry,              # 移动止损: 持仓期间最低价
@@ -215,6 +231,7 @@ class TradingState:
             if not pos:
                 return None
             mode = self.data["mode"]
+            pos_mode = pos.get("mode") or pos.get("strategy") or "donchian"
             dir_sign = 1 if pos["side"] == "LONG" else -1
             fee_rate = float(self.cfg["fees"]["taker"])
             gross = (exit_price - pos["entry"]) * pos["qty"] * dir_sign
@@ -239,6 +256,7 @@ class TradingState:
                 "fees": fees,
                 "reason": reason,
                 "strategy": pos["strategy"],
+                "mode": pos_mode,
             }
             self.data["trades"].append(trade)
             self.data["trades"] = self.data["trades"][-200:]
@@ -250,6 +268,16 @@ class TradingState:
                 st["wins"] += 1
             st["realized_pnl"] += pnl
             st["fees_paid"] += fees
+
+            # 按模式统计 (多模式对比/学习)
+            ms = self.data.setdefault("mode_stats", {}).setdefault(pos_mode, {
+                "total_trades": 0, "wins": 0, "realized_pnl": 0.0, "fees_paid": 0.0,
+            })
+            ms["total_trades"] += 1
+            if pnl > 0:
+                ms["wins"] += 1
+            ms["realized_pnl"] += pnl
+            ms["fees_paid"] += fees
 
             # 成交流水: 卖出记录
             if record:
@@ -312,6 +340,7 @@ class TradingState:
                     "realized_pnl": round(st["realized_pnl"], 2),
                     "fees_paid": round(st["fees_paid"], 2),
                 },
+                "mode_stats": self._mode_stats_out(),
                 "risk": {
                     "max_single": self.cfg["risk"]["max_single_order_notional"],
                     "max_total": self.cfg["risk"]["max_total_position_notional"],

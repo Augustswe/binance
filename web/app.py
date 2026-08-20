@@ -24,6 +24,10 @@ class SymbolsBody(BaseModel):
     symbols: list[str]
 
 
+class ModesBody(BaseModel):
+    modes: list[str]
+
+
 def create_app(engine) -> FastAPI:
     app = FastAPI(title="Binance 测试网量化仪表盘", docs_url=None, redoc_url=None)
 
@@ -93,19 +97,49 @@ def create_app(engine) -> FastAPI:
     # ---------------- 设置面板 ----------------
     @app.get("/api/settings")
     async def api_settings():
-        """返回设置面板需要的数据: 当前币种 + API 登录状态 + 可用币种候选"""
+        """返回设置面板需要的数据: 当前币种 + 模式 + API 登录状态 + 可用币种候选"""
         cfg = engine.cfg
         try:
             candidates = engine.exchange.search_symbols("", limit=200)
         except Exception as e:
             candidates = []
+        from strategies.modes import ALL_MODES
+
         return {
             "mode": cfg["mode"],
             "symbols": list(cfg["symbols"]),
+            "all_modes": ALL_MODES,
+            "enabled_modes": list(engine.enabled_modes),
+            "mode_weights": dict(engine.modes.weights),
             "api": engine.api_status(),
             "candidates": [c["symbol"] for c in candidates],
             "has_positions": list(engine.state.data["positions"].keys()),
         }
+
+    @app.post("/api/settings/modes")
+    async def api_settings_modes(body: ModesBody):
+        """切换启用的策略模式 (写 config.yaml + 热更新引擎)"""
+        from core.config import update_config_modes
+        from strategies.modes import ALL_MODES
+
+        modes = [m for m in body.modes if m in ALL_MODES]
+        if not modes:
+            return {"ok": False, "msg": "❌ 至少需要启用一个模式"}
+        try:
+            update_config_modes(modes)
+        except Exception as e:
+            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {e}"}
+        # 热更新: 重建模式管理器
+        from strategies.modes import ModeManager
+        engine.modes = ModeManager(engine.cfg, enabled_modes=modes)
+        engine.enabled_modes = engine.modes.enabled  # 以 ModeManager 为准
+        engine.donchian = engine.modes.donchian
+        from core.learner import load_mode_weights
+        learned_w = load_mode_weights()
+        if learned_w:
+            engine.modes.update_weights(learned_w)
+        engine.state.add_event("info", f"⚙️ 策略模式已切换: {', '.join(modes)}")
+        return {"ok": True, "msg": f"✅ 已启用模式: {', '.join(modes)}", "modes": modes}
 
     @app.get("/api/symbols/search")
     async def api_symbols_search(q: str = "", limit: int = 50):

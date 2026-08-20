@@ -215,6 +215,61 @@ def load_learner_state() -> dict:
     return {}
 
 
+# ---------------- 模式资金权重学习 (多模式对比) ----------------
+# 按各模式实盘表现分配资金权重: 赚钱多的权重高(多给资金), 亏钱的少给
+MODE_WEIGHTS_FILE = DATA_DIR / "mode_weights.json"
+MODE_LABELS = {"donchian": "Donchian", "multi": "多策略", "grid": "网格",
+               "ma_cross": "均线", "rsi": "RSI", "bollinger": "布林带"}
+
+
+def learn_mode_weights(mode_stats: dict, enabled: list[str] | None = None) -> dict:
+    """根据实盘 mode_stats 计算各模式资金权重
+
+    权重公式: 权重 = 1 + 净盈亏缩放, 并做平滑 (避免单笔巨亏导致极端值)
+    - realized_pnl > 0: 权重 = 1 + pnl/(基准) , 上限 3
+    - realized_pnl <= 0: 权重 = max(0.3, 1 + pnl/|基准|)
+    返回 {mode: weight}
+    """
+    log = get_logger("learner")
+    if not mode_stats:
+        return {}
+    base = 50.0  # 基准: 每盈利 50U 权重 +1 (约合 1% 账户)
+    weights: dict[str, float] = {}
+    for mode, ms in mode_stats.items():
+        pnl = float(ms.get("realized_pnl", 0.0))
+        if pnl > 0:
+            w = 1.0 + pnl / base
+            weights[mode] = max(1.0, min(3.0, w))
+        elif pnl < 0:
+            w = 1.0 + pnl / base
+            weights[mode] = max(0.3, min(1.0, w))
+        else:
+            weights[mode] = 1.0
+    if enabled:
+        weights = {m: weights.get(m, 1.0) for m in enabled}
+    # 保存
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(MODE_WEIGHTS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"weights": weights, "learned_at": time.time()}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.warning("保存模式权重失败: %s", e)
+    log.info("模式资金权重更新: %s",
+             " | ".join(f"{MODE_LABELS.get(m, m)}={w:.2f}x" for m, w in weights.items()))
+    return weights
+
+
+def load_mode_weights() -> dict:
+    """加载已学习的模式资金权重"""
+    if MODE_WEIGHTS_FILE.exists():
+        try:
+            with open(MODE_WEIGHTS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get("weights", {})
+        except Exception:
+            pass
+    return {}
+
+
 def load_current_combo() -> dict | None:
     """加载当前生效的组合 (无则 None)"""
     if STATE_FILE.exists():

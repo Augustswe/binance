@@ -2,6 +2,7 @@
 "use strict";
 
 const REFRESH_MS = 2000;
+const MODE_LABELS = { donchian: "Donchian", multi: "多策略", grid: "网格", ma_cross: "均线", rsi: "RSI", bollinger: "布林带" };
 let cfg = null;
 let lastEquity = null;
 let lastSnapshot = null;
@@ -143,6 +144,7 @@ async function refresh() {
   renderSymbols(s);
   renderSignals(s);
   renderTrades(s);
+  renderModes(s);
   renderLogs(s);
 
   $("foot").textContent =
@@ -175,16 +177,23 @@ function renderSymbols(s) {
   for (const sym of order) {
     const price = s.prices[sym];
     const chg = s.change_24h[sym];
-    const sig = s.signals[sym] || {};
     const pos = posMap[sym];
+    // 该币种各模式信号: 优先取持仓模式的信号
+    let sig = {};
+    for (const k of Object.keys(s.signals)) {
+      if (k.endsWith(":" + sym)) {
+        sig = s.signals[k];
+        if (pos && k.startsWith(pos.mode + ":")) break;
+      }
+    }
     const chgCls = chg >= 0 ? "pos" : "neg";
     html += `<tr>
       <td><b>${sym}</b></td>
       <td class="mono">${fmtPrice(price)}</td>
       <td class="mono ${chgCls}">${chg == null ? "--" : sign(chg) + fmt(chg, 2) + "%"}</td>
       <td>${regimePill(sig.regime)}</td>
-      <td>${scoreBar(sig.combined)}</td>
-      <td>${stratName(sig.dominant)}</td>
+      <td>${scoreBar(sig.combined != null ? sig.combined : sig.score)}</td>
+      <td>${sig.mode ? (MODE_LABELS[sig.mode] || sig.mode) : "--"}</td>
       <td class="mono">${sig.leverage ? sig.leverage + "x" : "--"}</td>
       <td>${pos ? posPill(pos) : '<span class="pill pill-none">空仓</span>'}</td>
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
@@ -213,53 +222,43 @@ function stratName(n) {
 
 function renderSignals(s) {
   const tb = document.querySelector("#signals-table tbody");
-  const order = cfg ? cfg.symbols : Object.keys(s.signals);
+  // 按 模式:币种 的 key 排序展示 (先模式后币种)
+  const keys = Object.keys(s.signals).sort();
+  if (!keys.length) {
+    tb.innerHTML = `<tr><td colspan="9" class="empty">等待首个K线分析…</td></tr>`;
+    return;
+  }
   let html = "";
-  for (const sym of order) {
-    const g = s.signals[sym];
-    if (!g) {
-      html += `<tr><td><b>${sym}</b></td><td colspan="11" class="empty">等待首个K线分析…</td></tr>`;
-      continue;
+  for (const key of keys) {
+    const g = s.signals[key];
+    if (!g) continue;
+    const [mode, sym] = key.includes(":") ? key.split(":") : [g.mode || "donchian", key];
+    const mlabel = MODE_LABELS[mode] || mode;
+    // 距通道 (donchian 特有)
+    const price = s.prices[sym];
+    let dist = "--";
+    if (mode === "donchian" && price > 0 && g.up_level > 0 && g.dn_level > 0) {
+      const toUp = (g.up_level - price) / price * 100;
+      const toDn = (price - g.dn_level) / price * 100;
+      dist = `上${sign(-toUp)}${fmt(Math.abs(toUp), 2)}% / 下${sign(-toDn)}${fmt(Math.abs(toDn), 2)}%`;
+    } else if (mode !== "donchian" && price > 0) {
+      const r = g.regime === "trend_up" ? "↑趋势" : g.regime === "trend_down" ? "↓趋势" : "震荡";
+      dist = r;
     }
-    if (g.mode === "donchian") {
-      // 距通道距离: 价格离上轨/下轨多远 (等待突破时的关键观察点)
-      const price = s.prices[sym];
-      let dist = "--";
-      if (price > 0 && g.up_level > 0 && g.dn_level > 0) {
-        const toUp = (g.up_level - price) / price * 100;
-        const toDn = (price - g.dn_level) / price * 100;
-        dist = `上${sign(-toUp)}${fmt(Math.abs(toUp), 2)}% / 下${sign(-toDn)}${fmt(Math.abs(toDn), 2)}%`;
-      }
-      const waiting = g.action === "等待";
-      html += `<tr>
-        <td><b>${sym}</b></td>
-        <td>${regimePill(g.regime)}</td>
-        <td class="mono">${waiting ? '<span class="pill pill-none">⏳等待突破</span>' : (g.action === "LONG" ? '<span class="pill pill-long">▲做多</span>' : '<span class="pill pill-short">▼做空</span>')}</td>
-        <td>${scoreBar(g.combined)}</td>
-        <td class="mono">${fmt(g.atr_pct, 3)}%</td>
-        <td class="mono">${fmt(g.strength, 2)}</td>
-        <td class="mono ${g.leverage > 1 ? "pos" : ""}">${g.leverage}x</td>
-        <td class="mono">${dist}</td>
-        <td class="mono">${fmtTime(g.ts)}</td>
-        <td colspan="3"></td>
-      </tr>`;
-      continue;
-    }
+    const waiting = g.action === "等待" || g.action == null;
     html += `<tr>
-      <td><b>${sym}</b></td>
+      <td><b>${mlabel}</b> <span class="mono" style="color:var(--muted)">${sym}</span></td>
       <td>${regimePill(g.regime)}</td>
-      <td class="mono">${fmt(g.scores.grid, 2)}</td>
-      <td class="mono">${fmt(g.scores.ma_cross, 2)}</td>
-      <td class="mono">${fmt(g.scores.rsi, 2)}</td>
-      <td class="mono">${fmt(g.scores.bollinger, 2)}</td>
-      <td>${scoreBar(g.combined)}</td>
+      <td class="mono">${waiting ? '<span class="pill pill-none">等待</span>' : (g.action === "LONG" ? '<span class="pill pill-long">▲做多</span>' : '<span class="pill pill-short">▼做空</span>')}</td>
+      <td>${scoreBar(g.combined != null ? g.combined : g.score)}</td>
       <td class="mono">${fmt(g.atr_pct, 3)}%</td>
-      <td class="mono">${fmt(g.vol_ratio, 2)}</td>
-      <td class="mono">${g.leverage}x</td>
+      <td class="mono">${fmt(g.strength, 2)}</td>
+      <td class="mono ${g.leverage > 1 ? "pos" : ""}">${g.leverage}x</td>
+      <td class="mono">${dist}</td>
       <td class="mono">${fmtTime(g.ts)}</td>
     </tr>`;
   }
-  tb.innerHTML = html || `<tr><td colspan="12" class="empty">暂无数据</td></tr>`;
+  tb.innerHTML = html;
 }
 
 function renderTrades(s) {
@@ -285,6 +284,39 @@ function renderTrades(s) {
       <td class="mono">${o.fees == null ? "--" : fmt(o.fees) + " U"}</td>
       <td class="mono ${pnlCls}">${o.pnl == null ? "--" : sign(o.pnl) + fmt(o.pnl) + " U"}</td>
       <td>${o.reason || "--"}</td>
+    </tr>`;
+  }
+  tb.innerHTML = html;
+}
+
+// ---------------- 模式对比表 ----------------
+let enabledModes = [];
+let modeWeights = {};
+
+function renderModes(s) {
+  const tb = document.querySelector("#modes-table tbody");
+  if (!tb) return;
+  const stats = s.mode_stats || {};
+  const all = Object.keys(MODE_LABELS);
+  // 用已启用的模式 + 有统计的模式合并展示
+  const shown = [...new Set([...enabledModes, ...Object.keys(stats)])].filter(m => all.includes(m));
+  if (!shown.length) {
+    tb.innerHTML = `<tr><td colspan="7" class="empty">暂无模式数据（系统运行后自动统计）</td></tr>`;
+    return;
+  }
+  let html = "";
+  for (const m of shown) {
+    const st = stats[m] || { total_trades: 0, wins: 0, win_rate: 0, realized_pnl: 0, fees_paid: 0 };
+    const enabled = enabledModes.includes(m);
+    const w = modeWeights[m] != null ? modeWeights[m] : 1.0;
+    html += `<tr${enabled ? "" : ' style="opacity:.45"'}>
+      <td><b>${MODE_LABELS[m] || m}</b></td>
+      <td>${enabled ? '<span class="pill pill-long">启用</span>' : '<span class="pill pill-none">停用</span>'}</td>
+      <td class="mono ${w > 1.05 ? "pos" : w < 0.95 ? "neg" : ""}">${fmt(w, 2)}x</td>
+      <td class="mono">${st.total_trades}</td>
+      <td class="mono">${fmt(st.win_rate, 1)}%</td>
+      <td class="mono ${cls(st.realized_pnl)}">${sign(st.realized_pnl)}${fmt(st.realized_pnl)} U</td>
+      <td class="mono">${fmt(st.fees_paid)} U</td>
     </tr>`;
   }
   tb.innerHTML = html;
@@ -479,9 +511,50 @@ document.addEventListener("DOMContentLoaded", () => {
         $("set-api-secret").value = "";
         $("set-api-key").placeholder = api.key_masked;
       }
+      // 模式信息 (全局, 供模式对比表)
+      enabledModes = settingsData.enabled_modes || [];
+      modeWeights = settingsData.mode_weights || {};
+      renderModeSettings();
       renderSymbolList();
     } catch (e) {
       setMsg("❌ 加载设置失败: " + e, true);
+    }
+  }
+
+  // 模式勾选 UI
+  function renderModeSettings() {
+    const box = $("set-modes");
+    if (!box) return;
+    const all = settingsData.all_modes || [];
+    box.innerHTML = all.map(m => {
+      const on = (settingsData.enabled_modes || []).includes(m);
+      const w = (settingsData.mode_weights || {})[m];
+      const wTxt = w != null ? ` <span class="mono" style="color:var(--muted);font-size:11px">权重${fmt(w,2)}x</span>` : "";
+      return `<label class="mode-check ${on ? "on" : ""}">
+        <input type="checkbox" data-mode="${m}" ${on ? "checked" : ""}>
+        ${MODE_LABELS[m] || m}${wTxt}
+      </label>`;
+    }).join("");
+    box.querySelectorAll("input[type=checkbox]").forEach(cb => {
+      cb.addEventListener("change", saveModes);
+    });
+  }
+
+  async function saveModes() {
+    const modes = [...document.querySelectorAll("#set-modes input:checked")].map(x => x.dataset.mode);
+    if (!modes.length) { setMsg("❌ 至少需要一个模式", true); renderModeSettings(); return; }
+    setMsg("保存模式中…");
+    const res = await fetch("/api/settings/modes", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ modes }),
+    }).then(r => r.json());
+    setMsg(res.msg || "保存失败", !res.ok);
+    if (res.ok) {
+      settingsData.enabled_modes = res.modes;
+      enabledModes = res.modes;
+      renderModeSettings();
+    } else {
+      renderModeSettings();
     }
   }
 
