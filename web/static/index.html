@@ -48,6 +48,20 @@
           <button class="net-opt" data-net="mainnet" id="net-mainnet" type="button">💰 主网 · 真实资金</button>
         </div>
         <div class="net-unlock-warn" id="set-net-unlock" style="display:none"></div>
+        <div class="net-countdown" id="set-net-countdown" style="display:none">
+          <div class="cd-item">
+            <span class="cd-num" id="cd-elapsed">--</span>
+            <span class="cd-label">已开启(天)</span>
+          </div>
+          <div class="cd-item cd-next">
+            <span class="cd-num" id="cd-next">--</span>
+            <span class="cd-label" id="cd-next-label">距下一档(天)</span>
+          </div>
+          <div class="cd-item">
+            <span class="cd-num" id="cd-tier">--</span>
+            <span class="cd-label">当前档位</span>
+          </div>
+        </div>
         <div class="net-mainnet-box" id="set-mainnet-box" style="display:none">
           <div class="net-warn">⚠️ 主网 API 与测试网完全独立, 仅用于真实账户下单。保存即写入 .env (BINANCE_API_KEY / BINANCE_API_SECRET)。</div>
           <div class="modal-row">

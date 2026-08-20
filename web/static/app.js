@@ -857,6 +857,29 @@ function renderModeSettings() {
     // 主网输入框: 仅在主网时显示 (便于提前填好 Key)
     const box = $("set-mainnet-box");
     if (box) box.style.display = net === "mainnet" ? "block" : "none";
+
+    // 主网解锁倒计时 (按天): 复用后端 mainnet_cap_info 的 elapsed_days / next_days / tier
+    const cd = $("set-net-countdown");
+    if (cd && m) {
+      cd.style.display = "flex";
+      $("cd-elapsed").textContent = (m.elapsed_days != null) ? m.elapsed_days : "--";
+      const nextEl = $("cd-next");
+      const nextLabel = $("cd-next-label");
+      if (m.next_days != null) {
+        nextEl.textContent = m.next_days;
+        nextLabel.textContent = (m.tier === "locked") ? "距开放(天)" : "距下一档(天)";
+        cd.classList.toggle("cd-locked", m.tier === "locked");
+        cd.classList.remove("cd-done");
+      } else {
+        nextEl.textContent = "✓";
+        nextLabel.textContent = "已全解锁";
+        cd.classList.add("cd-done");
+        cd.classList.remove("cd-locked");
+      }
+      $("cd-tier").textContent = m.tier || "--";
+    } else if (cd) {
+      cd.style.display = "none";
+    }
   }
 
   // ---------------- 开机自启 (macOS launchd) ----------------

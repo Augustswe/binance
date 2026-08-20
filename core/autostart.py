@@ -109,7 +109,18 @@ def _enable_mac() -> dict:
         if r.returncode != 0:
             r = subprocess.run(["launchctl", "load", str(path)], capture_output=True, text=True)
         if r.returncode != 0:
-            return {"ok": False, "msg": f"❌ launchctl 加载失败: {r.stderr.strip() or r.stdout.strip()}"}
+            # 加载失败: 清理孤立 plist, 避免状态卡在 "已安装但未加载" 误导用户
+            try:
+                if path.exists():
+                    path.unlink()
+            except Exception:
+                pass
+            detail = (r.stderr or r.stdout or "").strip()
+            # EIO(5) 通常是因为当前进程不在 GUI 登录会话中 (远程/沙箱/SSH 环境)
+            if "Input/output error" in detail or r.returncode == 5:
+                detail = (detail + "｜当前环境不在 GUI 登录会话, launchctl 无法注册用户级 agent。"
+                          "请在本机双击 start.command 启动服务后, 再在设置里点「启用开机自启」。").strip("｜")
+            return {"ok": False, "msg": f"❌ launchctl 加载失败: {detail}"}
     except Exception as e:
         return {"ok": False, "msg": f"❌ 写入/加载 plist 失败: {e}"}
     return {"ok": True, "msg": "✅ 开机自启已开启 (下次登录/开机自动启动)"}
