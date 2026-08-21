@@ -283,13 +283,23 @@ class TradingState:
             }
             self.data["trades"].append(trade)
             self.data["trades"] = self.data["trades"][-200:]
-            self.data["last_close_time"][symbol] = time.time()
-            # 冷静期开始记录 (持有锁内直接写 events, 避免 add_event 再次加锁死锁)
-            cd_min = int(self.cfg["risk"].get("cooldown_minutes", 0) or 0)
-            if cd_min > 0:
+            # 冷静期: 仅「真实平仓」(record=True, 含策略/手动平仓) 才计入 last_close_time;
+            # 外部/同步对账平仓(record=False, 如重启时本地有持仓而交易所没有) 不重置冷静期 ——
+            # 否则会用 time.time() 把早已平仓的币种重新计时, 造成"早就平了却还在冷静期"的假象。
+            if record:
+                self.data["last_close_time"][symbol] = time.time()
+                cd_min = int(self.cfg["risk"].get("cooldown_minutes", 0) or 0)
+                if cd_min > 0:
+                    self.data["events"].append({
+                        "ts": time.time(), "type": "info",
+                        "msg": f"⏳ {symbol} 平仓完成, 进入 {cd_min} 分钟冷静期 (可再次开仓前倒计时)",
+                    })
+                    if len(self.data["events"]) > 200:
+                        self.data["events"] = self.data["events"][-200:]
+            else:
                 self.data["events"].append({
                     "ts": time.time(), "type": "info",
-                    "msg": f"⏳ {symbol} 平仓完成, 进入 {cd_min} 分钟冷静期 (可再次开仓前倒计时)",
+                    "msg": f"🔁 {symbol} 外部/同步平仓 (不计入冷静期)",
                 })
                 if len(self.data["events"]) > 200:
                     self.data["events"] = self.data["events"][-200:]
