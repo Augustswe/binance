@@ -56,6 +56,10 @@ class InitialCapitalBody(BaseModel):
     value: float = 0.0
 
 
+class RunModeBody(BaseModel):
+    mode: str = "auto"
+
+
 class ManualTPSLBody(BaseModel):
     symbol: str
     tp: dict | None = None   # {"type":"price"|"pct","value":<number>} 或 None=清除
@@ -252,6 +256,7 @@ def create_app(engine) -> FastAPI:
             "autostart": autostart_status(),        # 开机自启状态 (macOS launchd)
             "initial_capital": float(engine.state.data.get("initial_capital", 0.0)),
             "equity": engine.state.equity(),
+            "run_mode": engine.run_mode,
         }
 
     @app.post("/api/settings/initial_capital")
@@ -267,6 +272,19 @@ def create_app(engine) -> FastAPI:
             "equity": engine.state.equity(),
             "msg": f"✅ 起始资金已设为 {body.value:.2f} U",
         }
+
+    @app.post("/api/settings/run_mode")
+    async def api_settings_run_mode(body: RunModeBody):
+        """设置运行模式: auto = 全部并行; 或指定某一策略(donchian/multi/grid/ma_cross/rsi/bollinger) 独占开仓权。
+        信号面板始终展示所有启用模式的判断, 仅开仓权受此值约束。写 config.yaml 并热更新引擎。"""
+        try:
+            from core.config import update_config_run_mode
+            update_config_run_mode(body.mode)
+        except ValueError as e:
+            return {"ok": False, "msg": str(e)}
+        engine.run_mode = body.mode
+        engine.state.add_event("info", f"⚙️ 运行模式已切换: {body.mode}")
+        return {"ok": True, "run_mode": engine.run_mode, "msg": f"✅ 运行模式已设为 {body.mode}"}
 
     @app.post("/api/settings/modes")
     async def api_settings_modes(body: ModesBody):

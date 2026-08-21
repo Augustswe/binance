@@ -63,6 +63,11 @@ class TradingEngine:
         self.modes = ModeManager(cfg)
         self.enabled_modes = self.modes.enabled
         self.donchian = self.modes.donchian  # 兼容旧代码引用
+        # 运行模式: auto = 全部并行; 否则只让指定策略开仓 (信号仍全展示)
+        _VALID_MODES = ("donchian", "multi", "grid", "ma_cross", "rsi", "bollinger")
+        self.run_mode = cfg.get("run_mode", "auto")
+        if self.run_mode not in _VALID_MODES:
+            self.run_mode = "auto"
         # 加载模式学习器学到的资金权重 (按实盘表现分配)
         learned_w = load_mode_weights()
         if learned_w:
@@ -883,10 +888,13 @@ class TradingEngine:
         # ============ 多模式并行: 每个启用模式独立分析/开仓 ============
         # 同币种竞争制: 该币种已有任何模式的持仓 → 只做该持仓的出场管理, 不再开新仓
         pos = d["positions"].get(symbol)
-        for mode in self.enabled_modes:
+        # 运行模式: auto = 全部启用模式并行; 否则只让指定策略有开仓权 (信号仍全展示)
+        eff_modes = self.enabled_modes if self.run_mode == "auto" else [self.run_mode]
+        for mode in eff_modes:
             sig = self.modes.analyze(mode, symbol, klines, price=mark)
             if sig is None:
                 continue
+            # 无论是否持仓都记录信号, 让信号面板能看到所有模式的判断 (修复"只剩 donchian")
             d["signals"][f"{mode}:{symbol}"] = sig.to_dict()
             # ---- ML 选择器: 震荡市抑制 Donchian 开仓 (出场管理不受影响) ----
             if mode == "donchian" and self.ml_selector and self.ml:
@@ -911,7 +919,7 @@ class TradingEngine:
                 if d["positions"].get(symbol):
                     break
             else:
-                # 有持仓: 出场管理 (donchian 走通道反向; 其他模式走信号消失)
+                # 有持仓: 出场管理只在"持有该仓的模式"上运行; 其余模式仅展示信号, 不 break
                 pos_mode = pos.get("mode", "donchian")
                 if mode == pos_mode:
                     if mode == "donchian" and self.donchian:
@@ -930,7 +938,6 @@ class TradingEngine:
                                 trade = await self.execution.close_position(symbol, mark, "信号消失")
                                 if trade:
                                     await self._notify_close(trade)
-                break  # 有持仓时只处理持有该仓的模式
 
     async def _try_open(self, symbol: str, side: str, price: float, result):
         d = self.state.data

@@ -148,9 +148,22 @@
       <!-- 策略模式 -->
       <div class="modal-sec">
         <div class="modal-sec-title">策略模式 <span class="hint">多选 · 各模式独立开仓统计 · 系统按实盘表现自动分配资金权重</span></div>
+        <div class="modal-row runmode-row">
+          <span class="modal-label">运行模式</span>
+          <select id="set-run-mode" class="input">
+            <option value="auto">自动 (全部并行)</option>
+            <option value="donchian">唐奇安通道</option>
+            <option value="multi">多策略合成</option>
+            <option value="grid">网格</option>
+            <option value="ma_cross">均线金叉</option>
+            <option value="rsi">RSI</option>
+            <option value="bollinger">布林带</option>
+          </select>
+          <span class="hint">当前: <b id="set-run-mode-tag">自动并行</b> · 手动指定用哪个策略下单</span>
+        </div>
         <div id="set-modes" class="modal-mode-grid"></div>
         <div class="modal-row" style="margin-top:8px">
-          <span class="hint">同币种先到先得 · 新增策略后, 下方"策略信号"模块会自动新增对应 Tab</span>
+          <span class="hint">同币种先到先得 · 新增策略后, 下方"策略信号"模块会自动新增对应 Tab · 钉选某策略后仅该策略有开仓权, 信号仍全展示</span>
         </div>
       </div>
       <hr class="modal-hr">

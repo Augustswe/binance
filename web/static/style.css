@@ -297,6 +297,15 @@ body.modal-open { overflow: hidden; }
   background: var(--panel2); color: var(--muted);
 }
 .sig-tab.active .tab-count { background: var(--green-bg); color: var(--green); }
+.sig-tab.pinned {
+  color: var(--yellow); border-color: var(--yellow);
+  background: rgba(240,185,11,.08);
+}
+.sig-tab.pinned .tab-count { background: rgba(240,185,11,.18); color: var(--yellow); }
+.sig-tab .tab-pin {
+  display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700;
+  color: var(--yellow);
+}
 .sig-tab-panel { display: none; }
 .sig-tab-panel.active { display: block; }
 .sig-tab-panel .empty { padding: 28px 12px; }

@@ -19,6 +19,12 @@ mainnet:
 # 策略模式: multi = 多策略自适应评分 | donchian = Donchian通道突破趋势跟踪(长周期, 4年回测5币全正)
 strategy_mode: donchian
 
+# 运行模式 (手动选择用哪个策略下单):
+#   auto  = 自动: 下方 modes.enabled 全部并行, 同币种先到先得 (默认)
+#   <策略> = 只让指定策略开仓, 例如 donchian / multi / grid / ma_cross / rsi / bollinger
+# 信号面板始终展示所有启用模式的判断; 仅"开仓权"受此值约束
+run_mode: auto
+
 # 多模式并行 (可多选): donchian / multi / grid / ma_cross / rsi / bollinger
 # 每个模式独立开仓独立统计, 同币种竞争制(先到先得), 系统按实盘表现分配资金权重
 modes:
@@ -161,6 +167,12 @@ ml_filter:
 logging:
   level: INFO
   file: logs/quant.log
+
+
+
+
+
+
 
 
 

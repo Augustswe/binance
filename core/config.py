@@ -79,6 +79,32 @@ def update_config_modes(modes: list[str]) -> None:
     path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def update_config_run_mode(mode: str) -> None:
+    """更新 config.yaml 顶层 run_mode 标量 (文本级替换, 保留注释/顺序)"""
+    VALID = ("auto", "donchian", "multi", "grid", "ma_cross", "rsi", "bollinger")
+    if mode not in VALID:
+        raise ValueError(f"run_mode 非法: {mode}")
+    path = BASE_DIR / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    out: list[str] = []
+    replaced = False
+    for line in lines:
+        if re.match(r"^run_mode:\s*", line) and not replaced:
+            out.append(f"run_mode: {mode}")
+            replaced = True
+            continue
+        out.append(line)
+    if not replaced:
+        # 未找到 run_mode 行: 插在 strategy_mode 行之后
+        out = []
+        for line in lines:
+            out.append(line)
+            if re.match(r"^strategy_mode:\s*", line):
+                out.append(f"run_mode: {mode}")
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
 def _replace_block_values(text: str, block_key: str, values: dict) -> str:
     """在 config.yaml 某顶层块内, 按 key 原地替换标量值 (保留注释/顺序/其它 key)
 

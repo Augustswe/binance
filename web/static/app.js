@@ -420,8 +420,10 @@ function renderSignalsTabs(usedModes) {
     return;
   }
   tabs.innerHTML = list.map((m, i) => {
-    return `<div class="sig-tab ${(!sigActiveTab || sigActiveTab === m) && i === 0 ? "active" : ""}" data-tab="${m}">
-      ${MODE_LABELS[m] || m}<span class="tab-count" data-count="${m}">0</span>
+    const pinned = runMode !== "auto" && runMode === m;
+    const active = (!sigActiveTab || sigActiveTab === m) && i === 0;
+    return `<div class="sig-tab ${active ? "active" : ""} ${pinned ? "pinned" : ""}" data-tab="${m}" title="${pinned ? "当前运行模式: 仅此策略开仓" : ""}">
+      ${MODE_LABELS[m] || m}${pinned ? '<span class="tab-pin">●运行中</span>' : ""}<span class="tab-count" data-count="${m}">0</span>
     </div>`;
   }).join("");
   // 为每个模式建面板
@@ -532,6 +534,7 @@ function renderTrades(s) {
 
 // ---------------- 模式对比表 ----------------
 let enabledModes = [];
+let runMode = "auto";  // 运行模式: auto = 全部并行, 否则只让指定策略开仓
 let modeWeights = {};
 
 function renderModes(s) {
@@ -900,6 +903,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function renderModeSettings() {
   const box = $("set-modes");
   if (!box) return;
+  if (settingsData.run_mode) runMode = settingsData.run_mode;  // 与后端同步
   const all = settingsData.all_modes || [];
   box.innerHTML = all.map(m => {
     const on = (settingsData.enabled_modes || []).includes(m);
@@ -915,6 +919,35 @@ function renderModeSettings() {
   box.querySelectorAll("input[type=checkbox]").forEach(cb => {
     cb.addEventListener("change", saveModes);
   });
+  // 同步运行模式选择器
+  const sel = $("set-run-mode");
+  if (sel) {
+    sel.value = runMode;
+    const tag = $("set-run-mode-tag");
+    if (tag) tag.textContent = runMode === "auto" ? "自动并行" : (MODE_LABELS[runMode] || runMode);
+  }
+}
+
+async function saveRunMode() {
+  const sel = $("set-run-mode");
+  if (!sel) return;
+  const mode = sel.value;
+  setMsg("保存运行模式中…");
+  const res = await fetch("/api/settings/run_mode", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  }).then(r => r.json());
+  setMsg(res.msg || "保存失败", !res.ok);
+  if (res.ok) {
+    runMode = res.run_mode;
+    settingsData.run_mode = runMode;
+    const tag = $("set-run-mode-tag");
+    if (tag) tag.textContent = runMode === "auto" ? "自动并行" : (MODE_LABELS[runMode] || runMode);
+    // 让信号面板默认聚焦当前运行模式, 并立即重渲染 Tab (即时显示"●运行中"标记)
+    if (typeof lastSnapshot !== "undefined" && lastSnapshot) renderSignals(lastSnapshot);
+    if (runMode !== "auto") setActiveSigTab(runMode);
+    else if (sigActiveTab && sigActiveTab !== "auto") setActiveSigTab(enabledModes[0] || "donchian");
+  }
 }
 
   async function saveModes() {
@@ -1319,6 +1352,10 @@ function renderModeSettings() {
   });
 
   $("btn-save-pnl-init").addEventListener("click", savePnlInit);
+
+  // 运行模式选择器 (自动 / 指定策略)
+  const rmSel = document.getElementById("set-run-mode");
+  if (rmSel) rmSel.addEventListener("change", saveRunMode);
 
   window.addEventListener("resize", () => {
     if (lastSnapshot) drawChart(lastSnapshot.equity_history, lastSnapshot.day_start_equity);
