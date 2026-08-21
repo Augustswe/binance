@@ -303,10 +303,11 @@ function renderSymbols(s) {
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
       <td class="mono ${cls(pos ? pos.upnl : 0)}">${pos ? sign(pos.upnl) + fmt(pos.upnl) : "--"}</td>
       <td>${pos ? tpSlCell(pos) : '<span class="hint">--</span>'}</td>
+      ${cooldownCell(s, sym)}
     </tr>`;
     if (open) html += tpslDetailRow(pos);
   }
-  tb.innerHTML = html || `<tr><td colspan="11" class="empty">暂无数据</td></tr>`;
+  tb.innerHTML = html || `<tr><td colspan="12" class="empty">暂无数据</td></tr>`;
 
   // 恢复焦点到正在编辑的输入框 (轮询重建后不打断输入)
   if (activeField && tpslOpenSym) {
@@ -449,8 +450,48 @@ function opt(sel, val, label) {
   return `<option value="${val}" ${sel === val ? "selected" : ""}>${label}</option>`;
 }
 
+// 冷静期剩余秒数 → 倒计时文本 MM:SS (超过 1 小时 H:MM:SS)
+function fmtCountdown(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+// 行情表「冷静期」列: 在冷静期内的币种显示实时倒计时徽章 (data-lct=上次平仓时间戳, data-cd=冷静期秒数)
+function cooldownCell(s, sym) {
+  const cd = s.cooldown_minutes || 0;
+  const lct = (s.last_close_time && s.last_close_time[sym]) || 0;
+  if (!cd || !lct) return `<td class="cooldown-cell hint">--</td>`;
+  const remaining = cd * 60 - (Date.now() / 1000 - lct);
+  if (remaining <= 0) return `<td class="cooldown-cell hint">--</td>`;
+  return `<td class="cooldown-cell"><span class="cooldown-badge" data-lct="${lct}" data-cd="${cd * 60}">⏳ ${fmtCountdown(remaining)}</span></td>`;
+}
+
+// 每秒重算各冷静期徽章剩余时间 (基于 lastSnapshot 缓存, 无需额外请求)
+function updateCooldowns() {
+  const s = lastSnapshot;
+  if (!s) return;
+  document.querySelectorAll(".cooldown-badge").forEach((el) => {
+    const lct = parseFloat(el.dataset.lct) || 0;
+    const cd = parseFloat(el.dataset.cd) || 0;
+    const remaining = cd - (Date.now() / 1000 - lct);
+    if (remaining <= 0) {
+      const td = el.closest("td");
+      if (td) td.outerHTML = `<td class="cooldown-cell hint">--</td>`;
+    } else {
+      el.textContent = "⏳ " + fmtCountdown(remaining);
+    }
+  });
+}
+
 async function onCloseNow(sym) {
-  if (!confirm(`确认按当前价市价平仓 ${sym}？\n此操作不可撤销 (测试网)。`)) return;
+  const ok = await confirmModal({
+    title: "立即平仓",
+    message: `确认按当前价市价平仓 ${sym}？\n此操作不可撤销 (测试网)。`,
+    confirmText: "确认平仓",
+    danger: true,
+  });
+  if (!ok) return;
   try {
     const res = await fetch(apiUrl("/api/close_position"), {
       method: "POST",
@@ -463,6 +504,38 @@ async function onCloseNow(sym) {
   } catch (e) {
     alert("请求失败: " + e);
   }
+}
+
+// 自定义确认弹窗 (替代 Chrome 原生 confirm): 返回 Promise<boolean>
+function confirmModal({ title = "确认", message = "", confirmText = "确认", cancelText = "取消", danger = false } = {}) {
+  return new Promise((resolve) => {
+    const el = document.getElementById("confirm-modal");
+    if (!el) { resolve(false); return; }
+    el.querySelector(".cm-title").textContent = title;
+    el.querySelector(".cm-msg").textContent = message;
+    const btn = el.querySelector(".cm-confirm");
+    btn.textContent = confirmText;
+    btn.classList.toggle("danger", !!danger);
+    btn.classList.toggle("btn-warn", !danger);
+    el.querySelector(".cm-cancel").textContent = cancelText;
+    let done = false;
+    const close = (val) => {
+      if (done) return;
+      done = true;
+      el.classList.remove("open");
+      el.removeEventListener("click", onBack);
+      btn.removeEventListener("click", onConfirm);
+      el.querySelector(".cm-cancel").removeEventListener("click", onCancel);
+      resolve(val);
+    };
+    const onConfirm = () => close(true);
+    const onCancel = () => close(false);
+    const onBack = (ev) => { if (ev.target === el) close(false); };
+    btn.addEventListener("click", onConfirm);
+    el.querySelector(".cm-cancel").addEventListener("click", onCancel);
+    el.addEventListener("click", onBack);
+    el.classList.add("open");
+  });
 }
 
 async function postManualTPSL(sym, tp, sl) {
@@ -754,7 +827,13 @@ function renderLogs(s) {
 }
 
 async function clearLogTerm() {
-  if (!confirm("确认清屏？此操作会清空全部系统日志且不可恢复。")) return;
+  const ok = await confirmModal({
+    title: "清空系统日志",
+    message: "确认清屏？\n此操作会清空全部系统日志且不可恢复。",
+    confirmText: "确认清空",
+    danger: true,
+  });
+  if (!ok) return;
   const list = document.getElementById("log-list");
   if (list) list.innerHTML = `<div class="empty">已清屏, 等待新日志…</div>`;
   _updateLogStatus(0);
@@ -879,6 +958,7 @@ function initPanel(account) {
   loadConfig();
   refresh();
   setInterval(refresh, REFRESH_MS);
+  setInterval(updateCooldowns, 1000);   // 冷静期倒计时每秒重算 (基于 lastSnapshot)
 
   // 事件委托: 止盈止损按钮/应用/清除
   // 关键: 后台每 5s 会整表 rebuild (innerHTML), 若在按钮上逐个绑 onclick 会被销毁, 导致点击落空.
@@ -1117,7 +1197,13 @@ async function onToggle(name, enabled) {
 }
 
 async function onReset(name) {
-  if (!confirm(`重置账户「${name}」?\n\n将清空该账户的全部持仓 / 成交 / 统计数据, 并从交易所重新同步。\n此操作不可恢复, 请确认。`)) return;
+  const ok = await confirmModal({
+    title: "重置账户",
+    message: `重置账户「${name}」?\n\n将清空该账户的全部持仓 / 成交 / 统计数据, 并从交易所重新同步。\n此操作不可恢复, 请确认。`,
+    confirmText: "确认重置",
+    danger: true,
+  });
+  if (!ok) return;
   try {
     const res = await fetch("/api/accounts/reset", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1129,7 +1215,13 @@ async function onReset(name) {
 }
 
 async function onUnbind(name) {
-  if (!confirm(`解绑账户「${name}」?\n\n将停止其引擎并从绑定列表移除 (state 文件保留备查)。`)) return;
+  const ok = await confirmModal({
+    title: "解绑账户",
+    message: `解绑账户「${name}」?\n\n将停止其引擎并从绑定列表移除 (state 文件保留备查)。`,
+    confirmText: "确认解绑",
+    danger: true,
+  });
+  if (!ok) return;
   try {
     const res = await fetch("/api/accounts/unbind", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1644,11 +1736,21 @@ function initSettings() {
   async function switchNetwork(net) {
     const m = settingsData.mainnet || (lastSnapshot && lastSnapshot.mainnet);
     if (net === "mainnet" && m && !m.unlocked) { alert("🔒 " + m.warning); renderNetworkSettings(); return; }
+    let ok = true;
     if (net === "mainnet") {
-      const ok = confirm("⚠️ 即将切换到【主网 / 真实资金】模式！\n\n此模式下的每一笔开仓/平仓都会动用你的真实资产。\n请确保:\n  · 已在下方填好主网 API Key/Secret\n  · 已合理设置风控与敞口上限\n\n确认切换? (取消则停留在测试网)");
+      ok = await confirmModal({
+        title: "切换到主网 / 真实资金",
+        message: "⚠️ 即将切换到【主网 / 真实资金】模式！\n\n此模式下的每一笔开仓/平仓都会动用你的真实资产。\n请确保:\n  · 已在下方填好主网 API Key/Secret\n  · 已合理设置风控与敞口上限\n\n确认切换? (取消则停留在测试网)",
+        confirmText: "确认切换主网",
+        danger: true,
+      });
       if (!ok) { renderNetworkSettings(); return; }
     } else {
-      const ok = confirm("切换回【测试网 / 虚拟资金】? (测试网使用虚拟资金, 不影响真实账户)");
+      ok = await confirmModal({
+        title: "切换回测试网",
+        message: "切换回【测试网 / 虚拟资金】? (测试网使用虚拟资金, 不影响真实账户)",
+        confirmText: "确认切换",
+      });
       if (!ok) { renderNetworkSettings(); return; }
     }
     setMsg("切换网络中…");

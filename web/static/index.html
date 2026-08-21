@@ -361,6 +361,18 @@
   </div>
 </div>
 
+<!-- 自定义确认弹窗 (替代 Chrome 原生 confirm, 用于平仓/重置/解绑/主网切换等不可撤销操作) -->
+<div id="confirm-modal" class="cm-overlay">
+  <div class="cm-box" role="dialog" aria-modal="true">
+    <div class="cm-title"></div>
+    <div class="cm-msg"></div>
+    <div class="cm-actions">
+      <button class="btn cm-cancel" type="button">取消</button>
+      <button class="btn cm-confirm btn-warn" type="button">确认</button>
+    </div>
+  </div>
+</div>
+
 <main>
   <!-- 概览卡片 -->
   <section class="cards" id="cards">
@@ -387,7 +399,7 @@
         <thead>
           <tr>
             <th>交易对</th><th>最新价</th><th>24h</th><th>市场状态</th><th>综合评分</th>
-            <th>主导策略</th><th>杠杆</th><th>持仓</th><th>入场价</th><th>未实现盈亏</th><th>止盈 / 止损</th>
+            <th>主导策略</th><th>杠杆</th><th>持仓</th><th>入场价</th><th>未实现盈亏</th><th>止盈 / 止损</th><th>冷静期</th>
           </tr>
         </thead>
         <tbody></tbody>

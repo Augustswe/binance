@@ -1,7 +1,19 @@
 """风控模块: 单笔限额、总持仓限额、持仓数上限、日亏损熔断"""
 from __future__ import annotations
 
+import time
+
 from .logger import get_logger
+
+
+def fmt_cooldown(sec: int) -> str:
+    """把剩余秒数格式化为倒计时文本: MM:SS 或超过 1 小时则 H:MM:SS"""
+    sec = max(0, int(sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
 
 
 class RiskManager:
@@ -47,8 +59,11 @@ class RiskManager:
         # 冷静期
         last_close = d["last_close_time"].get(symbol, 0)
         cooldown = self.risk["cooldown_minutes"] * 60
-        if last_close and (__import__("time").time() - last_close) < cooldown:
-            return False, "冷静期内"
+        if last_close:
+            elapsed = time.time() - last_close
+            if elapsed < cooldown:
+                remaining = int(cooldown - elapsed)
+                return False, f"冷静期 {fmt_cooldown(remaining)}"
         return True, "ok"
 
     def should_halt(self, state) -> bool:

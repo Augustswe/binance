@@ -251,6 +251,27 @@ body.modal-open { overflow: hidden; }
   0%, 100% { box-shadow: 0 2px 12px rgba(239,83,80,.25); }
   50% { box-shadow: 0 2px 18px rgba(239,83,80,.6); }
 }
+
+/* ================ 自定义确认弹窗 (替代 Chrome 原生 confirm) ================ */
+.cm-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.55);
+  display: none; align-items: center; justify-content: center;
+}
+.cm-overlay.open { display: flex; }
+.cm-box {
+  width: min(420px, 90vw); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  animation: cm-pop .14s ease-out;
+}
+@keyframes cm-pop { from { transform: translateY(8px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
+.cm-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+.cm-msg { font-size: 13px; line-height: 1.6; color: var(--muted); white-space: pre-line; word-break: break-word; }
+.cm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.cm-confirm.btn-warn { color: #000; background: var(--yellow); border-color: var(--yellow); }
+.cm-confirm.danger { color: #fff; background: var(--red); border-color: var(--red); }
+.cm-confirm.danger:hover { filter: brightness(1.08); }
 .risk-num { min-width: 64px; width: 64px; flex: 0 0 auto; }
 .btn-ok { background: var(--green); color: #fff; border: none; }
 .btn-ok:hover { filter: brightness(1.1); }
@@ -357,6 +378,20 @@ body.modal-open { overflow: hidden; }
 .tpsl-active-tag {
   font-size: 11px; color: var(--green);
   text-align: center;
+}
+
+/* 行情表「冷静期」实时倒计时徽章 */
+.cooldown-cell { text-align: center; }
+.cooldown-badge {
+  display: inline-block; padding: 3px 9px; border-radius: 12px;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; font-weight: 600;
+  color: var(--yellow); background: rgba(240,185,11,.12);
+  border: 1px solid var(--yellow); letter-spacing: .5px;
+  animation: cooldown-tick 1s steps(1) infinite;
+}
+@keyframes cooldown-tick {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
 }
 
 /* 持仓行内联止盈止损编辑器 */

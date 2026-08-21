@@ -283,6 +283,15 @@ class TradingState:
             self.data["trades"].append(trade)
             self.data["trades"] = self.data["trades"][-200:]
             self.data["last_close_time"][symbol] = time.time()
+            # 冷静期开始记录 (持有锁内直接写 events, 避免 add_event 再次加锁死锁)
+            cd_min = int(self.cfg["risk"].get("cooldown_minutes", 0) or 0)
+            if cd_min > 0:
+                self.data["events"].append({
+                    "ts": time.time(), "type": "info",
+                    "msg": f"⏳ {symbol} 平仓完成, 进入 {cd_min} 分钟冷静期 (可再次开仓前倒计时)",
+                })
+                if len(self.data["events"]) > 200:
+                    self.data["events"] = self.data["events"][-200:]
 
             st = self.data["strategy_stats"]
             st["total_trades"] += 1
@@ -369,6 +378,8 @@ class TradingState:
                     "daily_loss_stop": self.cfg["risk"]["daily_loss_stop"],
                     "max_positions": self.cfg["risk"]["max_positions"],
                 },
+                "cooldown_minutes": int(self.cfg["risk"].get("cooldown_minutes", 0) or 0),
+                "last_close_time": dict(d["last_close_time"]),   # 供前端实时计算冷静期倒计时
                 "events": list(reversed(d["events"][-50:])),   # 操作日志 (最新在前)
                 "last_tick_ts": d["last_tick_ts"],             # 主循环真实心跳时间
                 "last_update": time.time(),
