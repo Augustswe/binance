@@ -253,6 +253,15 @@ body.modal-open { overflow: hidden; }
 }
 
 /* ================ 自定义确认弹窗 (替代 Chrome 原生 confirm) ================ */
+/* 设置面板: 带解释 hover 的控件显示帮助光标, 提示用户可悬停查看说明 */
+#settings-modal .modal-label,
+#settings-modal .risk-field label,
+#settings-modal .modal-sec-title,
+#settings-modal .net-opt,
+#settings-modal .cd-item,
+#settings-modal input,
+#settings-modal select,
+#settings-modal .mode-card { cursor: help; }
 .cm-overlay {
   position: fixed; inset: 0; z-index: 200;
   background: rgba(0,0,0,.55);
@@ -378,20 +387,6 @@ body.modal-open { overflow: hidden; }
 .tpsl-active-tag {
   font-size: 11px; color: var(--green);
   text-align: center;
-}
-
-/* 行情表「冷静期」实时倒计时徽章 */
-.cooldown-cell { text-align: center; }
-.cooldown-badge {
-  display: inline-block; padding: 3px 9px; border-radius: 12px;
-  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; font-weight: 600;
-  color: var(--yellow); background: rgba(240,185,11,.12);
-  border: 1px solid var(--yellow); letter-spacing: .5px;
-  animation: cooldown-tick 1s steps(1) infinite;
-}
-@keyframes cooldown-tick {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .55; }
 }
 
 /* 持仓行内联止盈止损编辑器 */

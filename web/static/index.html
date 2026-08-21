@@ -157,24 +157,24 @@
     <div class="modal-body">
       <!-- 盈亏模块 -->
       <div class="modal-sec pnl-sec">
-        <div class="modal-sec-title">盈亏 <span class="hint">从起始资金到现有的累计盈亏 (现有 = 现金 + 未实现)</span></div>
+        <div class="modal-sec-title" title="从起始资金到现有的累计盈亏。现有资金 = 现金 + 未实现盈亏。盈亏比例 = (现有 − 起始) / 起始 × 100%。">盈亏 <span class="hint">从起始资金到现有的累计盈亏 (现有 = 现金 + 未实现)</span></div>
         <div class="pnl-countdown">
-          <div class="cd-item">
+          <div class="cd-item" title="你录入的起始本金, 是盈亏比例的分母。首次使用请在下方录入真实起始资金。">
             <span class="cd-num mono" id="pnl-init">--</span>
             <span class="cd-label">起始资金(U)</span>
           </div>
-          <div class="cd-item">
+          <div class="cd-item" title="当前账户总权益 = 可用现金 + 持仓未实现盈亏。">
             <span class="cd-num mono" id="pnl-cur">--</span>
             <span class="cd-label">现有资金(U)</span>
           </div>
-          <div class="cd-item">
+          <div class="cd-item" title="累计盈亏比例 = (现有 − 起始) / 起始 × 100%。国内习惯: 涨为红, 跌为绿。">
             <span class="cd-num mono" id="pnl-pct">--</span>
             <span class="cd-label">盈亏比例</span>
           </div>
         </div>
         <div class="modal-row">
-          <span class="modal-label">设置起始资金</span>
-          <input type="number" id="set-pnl-init" class="input mono" min="1" step="100" placeholder="输入起始资金 (U)">
+          <span class="modal-label" title="录入真实起始资金后, 方能计算盈亏比例。主网入金后建议重新录入以重置基准。">设置起始资金</span>
+          <input type="number" id="set-pnl-init" class="input mono" min="1" step="100" placeholder="输入起始资金 (U)" title="录入真实起始资金后, 方能计算盈亏比例; 主网入金后建议重新录入以重置基准。">
           <button class="btn btn-ok" id="btn-save-pnl-init" type="button">保存</button>
           <span class="hint">首次使用请录入真实起始资金, 盈亏比例据此计算</span>
         </div>
@@ -182,26 +182,26 @@
       <hr class="modal-hr">
       <!-- 交易网络切换 -->
       <div class="modal-sec net-sec">
-        <div class="modal-sec-title">交易网络 <span class="hint">热切换无需重启 · 主网 = 真实资金</span></div>
+        <div class="modal-sec-title" title="一键热切换测试网 / 主网, 无需重启服务。主网使用真实资金, 切换前需二次确认并填好主网 Key/Secret。">交易网络 <span class="hint">热切换无需重启 · 主网 = 真实资金</span></div>
         <div class="modal-row">
           <span class="modal-label">当前网络:</span>
           <span id="set-net-status" class="mono">--</span>
         </div>
         <div class="net-toggle">
-          <button class="net-opt" data-net="testnet" id="net-testnet" type="button">🧪 测试网 · 虚拟资金</button>
-          <button class="net-opt" data-net="mainnet" id="net-mainnet" type="button">💰 主网 · 真实资金</button>
+          <button class="net-opt" data-net="testnet" id="net-testnet" type="button" title="测试网: 虚拟资金, 无真实盈亏, 适合演练策略与调试。">🧪 测试网 · 虚拟资金</button>
+          <button class="net-opt" data-net="mainnet" id="net-mainnet" type="button" title="主网: 真实资金账户, 切换前需二次确认并填写主网 Key/Secret。">💰 主网 · 真实资金</button>
         </div>
         <div class="net-unlock-warn" id="set-net-unlock" style="display:none"></div>
         <div class="net-countdown" id="set-net-countdown" style="display:none">
-          <div class="cd-item">
+          <div class="cd-item" title="主网账户已开启的天数。">
             <span class="cd-num" id="cd-elapsed">--</span>
             <span class="cd-label">已开启(天)</span>
           </div>
-          <div class="cd-item cd-next">
+          <div class="cd-item cd-next" title="距离下一档权益 / 限额提升所需的天数。">
             <span class="cd-num" id="cd-next">--</span>
             <span class="cd-label" id="cd-next-label">距下一档(天)</span>
           </div>
-          <div class="cd-item">
+          <div class="cd-item" title="当前主网权益档位 (t1 / t2 / t3), 决定可用持仓限额。">
             <span class="cd-num" id="cd-tier">--</span>
             <span class="cd-label">当前档位</span>
           </div>
@@ -209,20 +209,20 @@
         <div class="net-mainnet-box" id="set-mainnet-box" style="display:none">
           <div class="net-warn">⚠️ 主网 API 与测试网完全独立, 仅用于真实账户下单。保存即写入 .env (BINANCE_API_KEY / BINANCE_API_SECRET)。</div>
           <div class="modal-row">
-            <span class="modal-label">主网 Key</span>
-            <input type="text" id="set-mainnet-key" class="input mono" placeholder="BINANCE_API_KEY">
+            <span class="modal-label" title="主网 API Key, 与测试网完全独立; 仅用于真实账户。保存即写入 .env。">主网 Key</span>
+            <input type="text" id="set-mainnet-key" class="input mono" placeholder="BINANCE_API_KEY" title="主网 API Key, 与测试网完全独立; 仅用于真实账户。保存即写入 .env。">
           </div>
           <div class="modal-row">
-            <span class="modal-label">主网 Secret</span>
-            <input type="password" id="set-mainnet-secret" class="input mono" placeholder="BINANCE_API_SECRET">
+            <span class="modal-label" title="主网 API Secret, 与测试网完全独立; 请妥善保管勿泄露。">主网 Secret</span>
+            <input type="password" id="set-mainnet-secret" class="input mono" placeholder="BINANCE_API_SECRET" title="主网 API Secret, 与测试网完全独立; 请妥善保管勿泄露。">
           </div>
           <div class="modal-row">
             <button class="btn btn-ok" id="btn-save-mainnet" type="button">保存主网 API</button>
             <span class="hint">切换为主网前必须先填好主网 Key/Secret</span>
           </div>
           <div class="modal-row" id="set-custom-row" style="display:none">
-            <span class="modal-label">自定义限额(U)</span>
-            <input type="number" id="set-mainnet-custom" class="input mono" min="1" step="50">
+            <span class="modal-label" title="自定义主网总持仓限额 (U)。仅跑满 90 天 (t3 档) 后开放。">自定义限额(U)</span>
+            <input type="number" id="set-mainnet-custom" class="input mono" min="1" step="50" title="自定义主网总持仓限额 (U)。仅跑满 90 天 (t3 档) 后开放。">
             <button class="btn btn-ok" id="btn-save-mainnet-quota" type="button">设置</button>
             <span class="hint">仅跑满90天(t3)后可自定义主网总持仓限额</span>
           </div>
@@ -237,12 +237,12 @@
           <span id="set-api-status" class="mono">--</span>
         </div>
         <div class="modal-row">
-          <span class="modal-label">API Key</span>
-          <input type="text" id="set-api-key" class="input mono" placeholder="BINANCE_TESTNET_API_KEY">
+          <span class="modal-label" title="测试网 API Key (testnet.binancefuture.com 用 GitHub 登录创建)。">API Key</span>
+          <input type="text" id="set-api-key" class="input mono" placeholder="BINANCE_TESTNET_API_KEY" title="测试网 API Key (testnet.binancefuture.com 用 GitHub 登录创建)。">
         </div>
         <div class="modal-row">
-          <span class="modal-label">API Secret</span>
-          <input type="password" id="set-api-secret" class="input mono" placeholder="BINANCE_TESTNET_API_SECRET">
+          <span class="modal-label" title="测试网 API Secret。live 模式保存后立即验证账户; paper 模式无需填写。">API Secret</span>
+          <input type="password" id="set-api-secret" class="input mono" placeholder="BINANCE_TESTNET_API_SECRET" title="测试网 API Secret。live 模式保存后立即验证账户; paper 模式无需填写。">
         </div>
         <div class="modal-row">
           <button class="btn btn-ok" id="btn-save-api">保存 API</button>
@@ -254,8 +254,8 @@
       <div class="modal-sec">
         <div class="modal-sec-title">策略模式 <span class="hint">多选 · 各模式独立开仓统计 · 系统按实盘表现自动分配资金权重</span></div>
         <div class="modal-row runmode-row">
-          <span class="modal-label">运行模式</span>
-          <select id="set-run-mode" class="input">
+          <span class="modal-label" title="选择哪个策略拥有开仓权。auto = 全部策略并行竞争; 钉选某策略 = 仅该策略开仓 (信号仍全展示)。多账户下策略在绑定时固定, 此处只读。">运行模式</span>
+          <select id="set-run-mode" class="input" title="选择哪个策略拥有开仓权。auto = 全部策略并行竞争; 钉选某策略 = 仅该策略开仓 (信号仍全展示)。多账户下策略在绑定时固定, 此处只读。">
             <option value="auto">自动 (全部并行)</option>
             <option value="donchian">唐奇安通道</option>
             <option value="multi">多策略合成</option>
@@ -277,14 +277,14 @@
       <div class="modal-sec">
         <div class="modal-sec-title">交易对管理</div>
         <div class="modal-row">
-          <input type="text" id="set-symbol-search" class="input" placeholder="搜索币种, 如 btc / eth / sol …">
+          <input type="text" id="set-symbol-search" class="input" placeholder="搜索币种, 如 btc / eth / sol …" title="输入币种关键字 (如 btc / eth / sol) 搜索可交易对, 点击搜索结果即可添加监控。">
           <button class="btn btn-ghost" id="btn-symbol-search">搜索</button>
         </div>
         <div id="set-search-results" class="modal-chips"></div>
         <div class="modal-row" style="margin-top:10px">
           <span class="modal-label">当前交易对 (点击 ✕ 移除):</span>
         </div>
-        <div id="set-symbol-list" class="modal-chips"></div>
+        <div id="set-symbol-list" class="modal-chips" title="当前监控并可能开仓的币种列表; 有持仓的不可移除, 需先平仓。"></div>
         <div class="modal-row" style="margin-top:8px">
           <span class="hint">⚠️ 有持仓的交易对不可移除, 需先平仓</span>
         </div>
@@ -295,32 +295,32 @@
         <div class="modal-sec-title">风控与敞口 <span class="hint">实时生效 · 保存即热更新并落盘 config.yaml</span></div>
         <div class="risk-grid">
           <div class="risk-field">
-            <label>总持仓上限 (U)</label>
-            <input type="number" id="risk-total" class="input" min="0" step="50">
+            <label title="所有持仓名义价值之和的上限, 单位 USDT。达到后不再开新仓。">总持仓上限 (U)</label>
+            <input type="number" id="risk-total" class="input" min="0" step="50" title="所有持仓名义价值之和的上限, 单位 USDT。达到后不再开新仓。">
           </div>
           <div class="risk-field">
-            <label>单笔上限 (U)</label>
-            <input type="number" id="risk-single" class="input" min="0" step="50">
+            <label title="单笔开仓名义价值上限, 单位 USDT。超过该值的信号不会开仓。">单笔上限 (U)</label>
+            <input type="number" id="risk-single" class="input" min="0" step="50" title="单笔开仓名义价值上限, 单位 USDT。超过该值的信号不会开仓。">
           </div>
           <div class="risk-field">
-            <label>单笔保证金 (U)</label>
-            <input type="number" id="risk-margin" class="input" min="0" step="10">
+            <label title="每笔开仓锁定的保证金预算; 实际名义仓位 = 保证金 × 杠杆。">单笔保证金 (U)</label>
+            <input type="number" id="risk-margin" class="input" min="0" step="10" title="每笔开仓锁定的保证金预算; 实际名义仓位 = 保证金 × 杠杆。">
           </div>
           <div class="risk-field">
-            <label>最大持仓数</label>
-            <input type="number" id="risk-positions" class="input" min="1" step="1">
+            <label title="同时持有的最大持仓数量。">最大持仓数</label>
+            <input type="number" id="risk-positions" class="input" min="1" step="1" title="同时持有的最大持仓数量。">
           </div>
           <div class="risk-field">
-            <label>日亏熔断 (%)</label>
-            <input type="number" id="risk-dd" class="input" min="1" max="100" step="1">
+            <label title="当日累计亏损达到该比例时触发熔断, 暂停所有交易, 直到手动重置或次日。">日亏熔断 (%)</label>
+            <input type="number" id="risk-dd" class="input" min="1" max="100" step="1" title="当日累计亏损达到该比例时触发熔断, 暂停所有交易, 直到手动重置或次日。">
           </div>
           <div class="risk-field">
-            <label>冷静期 (分钟)</label>
-            <input type="number" id="risk-cooldown" class="input" min="0" step="5">
+            <label title="平仓后 N 分钟内禁止同一币种再次开仓, 防止情绪化反复交易。倒计时与拒绝原因记录在系统日志中。">冷静期 (分钟)</label>
+            <input type="number" id="risk-cooldown" class="input" min="0" step="5" title="平仓后 N 分钟内禁止同一币种再次开仓, 防止情绪化反复交易。倒计时与拒绝原因记录在系统日志中。">
           </div>
           <div class="risk-field">
-            <label>总敞口占权益 (%)</label>
-            <select id="risk-exposure-pct" class="input">
+            <label title="总持仓名义价值占账户权益的比例上限。关闭 = 不限制; 20/40/60/80 为不同激进度, 超过 40% 会给出分级风险提示。">总敞口占权益 (%)</label>
+            <select id="risk-exposure-pct" class="input" title="总持仓名义价值占账户权益的比例上限。关闭 = 不限制; 20/40/60/80 为不同激进度, 超过 40% 会给出分级风险提示。">
               <option value="0">关闭</option>
               <option value="20">20%</option>
               <option value="40">40%</option>
@@ -331,17 +331,17 @@
         </div>
         <div id="exposure-pct-warn" class="risk-warn" style="display:none"></div>
         <div class="modal-row risk-lev-row">
-          <span class="modal-label" style="width:auto">杠杆</span>
-          <select id="risk-lev-mode" class="input risk-select">
+          <span class="modal-label" style="width:auto" title="auto = 按信号强度在 min~max 间动态调整杠杆; fixed = 固定杠杆。">杠杆</span>
+          <select id="risk-lev-mode" class="input risk-select" title="auto = 按信号强度在 min~max 间动态调整杠杆; fixed = 固定杠杆。">
             <option value="auto">auto 自动</option>
             <option value="fixed">fixed 固定</option>
           </select>
-          <span class="modal-label" style="width:auto">min</span>
-          <input type="number" id="risk-lev-min" class="input risk-num" min="1" step="1">
-          <span class="modal-label" style="width:auto">max</span>
-          <input type="number" id="risk-lev-max" class="input risk-num" min="1" step="1">
-          <span class="modal-label" style="width:auto">fixed</span>
-          <input type="number" id="risk-lev-fixed" class="input risk-num" min="1" step="1">
+          <span class="modal-label" style="width:auto" title="动态杠杆下限 (弱信号使用)。">min</span>
+          <input type="number" id="risk-lev-min" class="input risk-num" min="1" step="1" title="动态杠杆下限 (弱信号使用)。">
+          <span class="modal-label" style="width:auto" title="动态杠杆上限 (强信号使用)。">max</span>
+          <input type="number" id="risk-lev-max" class="input risk-num" min="1" step="1" title="动态杠杆上限 (强信号使用)。">
+          <span class="modal-label" style="width:auto" title="fixed 模式下的固定杠杆值。">fixed</span>
+          <input type="number" id="risk-lev-fixed" class="input risk-num" min="1" step="1" title="fixed 模式下的固定杠杆值。">
         </div>
         <div class="modal-row" style="margin-top:10px">
           <button class="btn btn-ok" id="btn-save-risk">保存风控</button>
@@ -350,9 +350,9 @@
       </div>
       <!-- 账户级操作: 仅入口页「账户设置」抽屉显示 (面板视图无设置入口) -->
       <div class="modal-sec" id="acc-reset-sec" style="display:none; border-top:1px dashed var(--border); margin-top:6px; padding-top:12px;">
-        <div class="modal-sec-title">账户操作</div>
+        <div class="modal-sec-title" title="账户级操作: 重置会清空持仓 / 成交 / 统计并重新从交易所同步。">账户操作</div>
         <div class="modal-row">
-          <button class="btn btn-warn" id="btn-acc-reset" type="button">重置账户</button>
+          <button class="btn btn-warn" id="btn-acc-reset" type="button" title="清空该账户全部持仓 / 成交 / 统计数据并重新从交易所同步; 操作不可恢复。">重置账户</button>
           <span class="hint">清空该账户全部持仓 / 成交 / 统计数据并重新从交易所同步; 操作不可恢复</span>
         </div>
       </div>
@@ -399,7 +399,7 @@
         <thead>
           <tr>
             <th>交易对</th><th>最新价</th><th>24h</th><th>市场状态</th><th>综合评分</th>
-            <th>主导策略</th><th>杠杆</th><th>持仓</th><th>入场价</th><th>未实现盈亏</th><th>止盈 / 止损</th><th>冷静期</th>
+            <th>主导策略</th><th>杠杆</th><th>持仓</th><th>入场价</th><th>未实现盈亏</th><th>止盈 / 止损</th>
           </tr>
         </thead>
         <tbody></tbody>

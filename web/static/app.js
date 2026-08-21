@@ -303,11 +303,10 @@ function renderSymbols(s) {
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
       <td class="mono ${cls(pos ? pos.upnl : 0)}">${pos ? sign(pos.upnl) + fmt(pos.upnl) : "--"}</td>
       <td>${pos ? tpSlCell(pos) : '<span class="hint">--</span>'}</td>
-      ${cooldownCell(s, sym)}
     </tr>`;
     if (open) html += tpslDetailRow(pos);
   }
-  tb.innerHTML = html || `<tr><td colspan="12" class="empty">暂无数据</td></tr>`;
+  tb.innerHTML = html || `<tr><td colspan="11" class="empty">暂无数据</td></tr>`;
 
   // 恢复焦点到正在编辑的输入框 (轮询重建后不打断输入)
   if (activeField && tpslOpenSym) {
@@ -450,39 +449,7 @@ function opt(sel, val, label) {
   return `<option value="${val}" ${sel === val ? "selected" : ""}>${label}</option>`;
 }
 
-// 冷静期剩余秒数 → 倒计时文本 MM:SS (超过 1 小时 H:MM:SS)
-function fmtCountdown(sec) {
-  sec = Math.max(0, Math.floor(sec));
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-// 行情表「冷静期」列: 在冷静期内的币种显示实时倒计时徽章 (data-lct=上次平仓时间戳, data-cd=冷静期秒数)
-function cooldownCell(s, sym) {
-  const cd = s.cooldown_minutes || 0;
-  const lct = (s.last_close_time && s.last_close_time[sym]) || 0;
-  if (!cd || !lct) return `<td class="cooldown-cell hint">--</td>`;
-  const remaining = cd * 60 - (Date.now() / 1000 - lct);
-  if (remaining <= 0) return `<td class="cooldown-cell hint">--</td>`;
-  return `<td class="cooldown-cell"><span class="cooldown-badge" data-lct="${lct}" data-cd="${cd * 60}">⏳ ${fmtCountdown(remaining)}</span></td>`;
-}
-
-// 每秒重算各冷静期徽章剩余时间 (基于 lastSnapshot 缓存, 无需额外请求)
-function updateCooldowns() {
-  const s = lastSnapshot;
-  if (!s) return;
-  document.querySelectorAll(".cooldown-badge").forEach((el) => {
-    const lct = parseFloat(el.dataset.lct) || 0;
-    const cd = parseFloat(el.dataset.cd) || 0;
-    const remaining = cd - (Date.now() / 1000 - lct);
-    if (remaining <= 0) {
-      const td = el.closest("td");
-      if (td) td.outerHTML = `<td class="cooldown-cell hint">--</td>`;
-    } else {
-      el.textContent = "⏳ " + fmtCountdown(remaining);
-    }
-  });
-}
+// 冷静期信息仅在系统日志中体现 (引擎在冷静期内拒绝开仓, 拒绝原因带「冷静期 MM:SS」倒计时; 平仓时写「进入 N 分钟冷静期」事件), 不在行情表中展示。
 
 async function onCloseNow(sym) {
   const ok = await confirmModal({
@@ -958,7 +925,6 @@ function initPanel(account) {
   loadConfig();
   refresh();
   setInterval(refresh, REFRESH_MS);
-  setInterval(updateCooldowns, 1000);   // 冷静期倒计时每秒重算 (基于 lastSnapshot)
 
   // 事件委托: 止盈止损按钮/应用/清除
   // 关键: 后台每 5s 会整表 rebuild (innerHTML), 若在按钮上逐个绑 onclick 会被销毁, 导致点击落空.
@@ -1427,12 +1393,20 @@ function initSettings() {
     const box = $("set-modes");
     if (!box) return;
     if (settingsData.run_mode) runMode = settingsData.run_mode;
+    const MODE_DESC = {
+      donchian: "唐奇安通道突破: 突破前 N 根 K 线最高/最低开仓, ATR 动态止损 + 移动止损锁利, 趋势跟随。",
+      multi: "多策略合成: 综合多个策略信号评分, 分数最高者触发, 适应不同市况。",
+      grid: "网格: 在价格区间内低买高卖, 震荡市盈利, 单边市需配合风控。",
+      ma_cross: "均线金叉/死叉: 快慢均线交叉判断方向, 趋势市有效。",
+      rsi: "RSI 反转: 超卖买入 / 超买卖出, 均值回归策略, 适合震荡。",
+      bollinger: "布林带: 价格触上/下轨反向, 或突破通道跟进, 波动策略。",
+    };
     const all = settingsData.all_modes || [];
     box.innerHTML = all.map(m => {
       const on = (settingsData.enabled_modes || []).includes(m);
       const w = (settingsData.mode_weights || {})[m];
       const wTxt = w != null ? fmt(w, 2) + "x" : "1.00x";
-      return `<label class="mode-card ${on ? "on" : ""}" data-mode="${m}">
+      return `<label class="mode-card ${on ? "on" : ""}" data-mode="${m}" title="${MODE_DESC[m] || ""}">
         <input type="checkbox" data-mode="${m}" ${on ? "checked" : ""}>
         <span class="mc-name">${MODE_LABELS[m] || m}</span>
         <span class="mc-weight">权重 ${wTxt}</span>
