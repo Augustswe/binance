@@ -119,6 +119,7 @@ def create_app(manager: AccountManager) -> FastAPI:
         snap["network"] = e.cfg["network"]  # 主网红色横幅用
         snap["mainnet"] = e.mainnet_cap_info()  # 主网分级解锁/限额信息
         snap["account"] = e.name
+        snap["run_mode"] = e.run_mode
         snap["strategy_label"] = STRATEGY_LABELS.get(e.run_mode, e.run_mode)
         return snap
 

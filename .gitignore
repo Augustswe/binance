@@ -11,3 +11,6 @@ logs/app.pid
 .DS_Store
 data/state.json.tmp
 *.plist.bak
+
+# WorkBuddy 项目记忆/数据 (非源码)
+.workbuddy-ai/

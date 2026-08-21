@@ -254,6 +254,28 @@ function renderSymbols(s) {
         if (pos && k.startsWith(pos.mode + ":")) break;
       }
     }
+    // 主导策略: 有持仓 → 持仓模式(真实在跑的策略); 无持仓 → 运行模式(单一策略即它本身)
+    //           auto/multi → 该币种各模式信号中评分最高/最优先触发的策略(数据驱动的主导策略)
+    let domLabel = "--";
+    if (pos && pos.mode) {
+      domLabel = MODE_LABELS[pos.mode] || pos.mode;
+    } else {
+      const rm = s.run_mode;
+      if (rm && rm !== "auto" && rm !== "multi" && MODE_LABELS[rm]) {
+        domLabel = MODE_LABELS[rm];
+      } else {
+        let best = null, bestMetric = -1;
+        for (const k of Object.keys(s.signals)) {
+          if (!k.endsWith(":" + sym)) continue;
+          const sg = s.signals[k];
+          const sc = Math.abs((sg.score != null ? sg.score : (sg.combined != null ? sg.combined : 0)) || 0);
+          const act = (sg.action && sg.action !== "等待") ? 1 : 0;   // 有开仓动作的信号优先
+          const metric = act * 1000 + sc;
+          if (metric > bestMetric) { bestMetric = metric; best = sg; }
+        }
+        if (best && best.mode) domLabel = MODE_LABELS[best.mode] || best.mode;
+      }
+    }
     const showLev = pos ? pos.leverage : sig.leverage;   // 有持仓显示真实杠杆, 无持仓显示计划杠杆
     const chgCls = chg >= 0 ? "pos" : "neg";
     const open = pos && tpslOpenSym === sym;
@@ -263,7 +285,7 @@ function renderSymbols(s) {
       <td class="mono ${chgCls}">${chg == null ? "--" : sign(chg) + fmt(chg, 2) + "%"}</td>
       <td>${regimePill(sig.regime)}</td>
       <td>${scoreBar(sig.combined != null ? sig.combined : sig.score)}</td>
-      <td>${sig.mode ? (MODE_LABELS[sig.mode] || sig.mode) : "--"}</td>
+      <td>${domLabel}</td>
       <td class="mono" title="${pos ? '实际持仓杠杆 (开仓时定, 持仓期间不变)' : '计划开仓杠杆 (按信号强度动态)'}">${showLev ? showLev + "x" : "--"}</td>
       <td>${pos ? posPill(pos) : '<span class="pill pill-none">空仓</span>'}</td>
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
@@ -895,14 +917,6 @@ function initPanel(account) {
       body: JSON.stringify({ action: paused ? "pause" : "resume" }),
     });
   });
-  $("btn-reset").addEventListener("click", async () => {
-    if (confirm("重置今日: 以当前权益为新起点并解除熔断?")) {
-      await fetch(apiUrl("/api/control"), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reset_day" }),
-      });
-    }
-  });
 
 }
 
@@ -1029,12 +1043,12 @@ function renderEntryAccounts(ov, a) {
         <div><span class="m-label">持仓</span><span class="mono">${x.open_positions}</span></div>
       </div>
       <div class="acc-actions">
-        <button class="btn btn-ghost btn-sm acc-settings" data-name="${escapeHtml(x.name)}">⚙️ 设置</button>
         <button class="btn btn-ok btn-sm acc-open" data-name="${escapeHtml(x.name)}">打开面板</button>
-        <button class="btn btn-ghost btn-sm acc-toggle" data-name="${escapeHtml(x.name)}" data-enabled="${x.enabled ? "0" : "1"}">${x.enabled ? "停用" : "启用"}</button>
-        <button class="btn btn-warn btn-sm acc-reset" data-name="${escapeHtml(x.name)}">重置账户</button>
-        <button class="btn btn-ghost btn-sm acc-unbind" data-name="${escapeHtml(x.name)}" ${isDefault ? "disabled title='默认账户不可解绑'" : ""}>解绑</button>
+        <button class="btn btn-ghost btn-sm acc-toggle" data-name="${escapeHtml(x.name)}" data-enabled="${x.enabled ? "0" : "1"}" title="启用 = 启动该账户的策略循环与自动交易; 停用 = 暂停自动交易 (保留现有持仓, 不再开新仓)">${x.enabled ? "停用" : "启用"}</button>
+        <button class="btn btn-ghost btn-sm acc-unbind" data-name="${escapeHtml(x.name)}" ${isDefault ? "disabled title='默认账户不可解绑'" : "title='解绑 = 停止该引擎并从账户列表移除 (本地 state 文件保留备查); 操作不可恢复, 默认账户不可解绑'"}>解绑</button>
+        <button class="btn btn-ghost btn-sm acc-settings" data-name="${escapeHtml(x.name)}" title="打开该账户的设置抽屉: API / 策略模式 / 交易对 / 风控 / 重置账户">⚙️ 设置</button>
       </div>
+      <div class="acc-explain">启用/停用: 开关该账户自动交易 · 解绑: 移除账户(默认账户不可解绑) · 设置: 账户参数与重置</div>
     </div>`;
   }).join("");
 
@@ -1043,7 +1057,6 @@ function renderEntryAccounts(ov, a) {
   }));
   list.querySelectorAll(".acc-settings").forEach(b => b.addEventListener("click", () => openEntrySettings(b.dataset.name)));
   list.querySelectorAll(".acc-toggle").forEach(b => b.addEventListener("click", () => onToggle(b.dataset.name, b.dataset.enabled === "1")));
-  list.querySelectorAll(".acc-reset").forEach(b => b.addEventListener("click", () => onReset(b.dataset.name)));
   list.querySelectorAll(".acc-unbind").forEach(b => b.addEventListener("click", () => onUnbind(b.dataset.name)));
 }
 
@@ -1136,6 +1149,9 @@ function openEntrySettings(name) {
   if (!modal) return;
   const head = modal.querySelector(".modal-head span");
   if (head) head.textContent = `⚙️ ${name} · 账户设置`;
+  // 账户级操作区(重置账户)仅在入口页「按账户」抽屉中显示
+  const rs = modal.querySelector("#acc-reset-sec");
+  if (rs) rs.style.display = "block";
   modal.style.display = "flex";
   document.body.classList.add("modal-open");
   setMsg("");
@@ -1145,7 +1161,11 @@ function openEntrySettings(name) {
 function closeEntrySettings() {
   gSettingsAccount = null;
   const modal = $("settings-modal");
-  if (modal) modal.style.display = "none";
+  if (modal) {
+    modal.style.display = "none";
+    const rs = modal.querySelector("#acc-reset-sec");
+    if (rs) rs.style.display = "none";
+  }
   document.body.classList.remove("modal-open");
   const head = modal && modal.querySelector(".modal-head span");
   if (head) head.textContent = "⚙️ 系统设置";
@@ -1205,6 +1225,12 @@ function initSettings() {
   $("btn-settings-close").addEventListener("click", closeEntrySettings);
   $("settings-modal").addEventListener("click", (e) => {
     if (e.target.id === "settings-modal") closeEntrySettings();
+  });
+  // 账户设置抽屉内的「重置账户」(仅入口页按账户上下文; gSettingsAccount 已在打开时设置)
+  $("btn-acc-reset").addEventListener("click", async () => {
+    if (!gSettingsAccount) return;
+    await onReset(gSettingsAccount);
+    closeEntrySettings();
   });
   $("btn-symbol-search").addEventListener("click", doSearch);
   $("set-symbol-search").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });

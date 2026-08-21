@@ -124,7 +124,6 @@
     <span id="status-badge" class="badge badge-ok">连接中…</span>
     <span id="account-chip" class="badge" style="display:none" title="当前账户 · 策略"></span>
     <button id="btn-pause" class="btn btn-warn">暂停</button>
-    <button id="btn-reset" class="btn btn-ghost">重置今日</button>
   </div>
 </header>
 
@@ -321,6 +320,14 @@
         <div class="modal-row" style="margin-top:10px">
           <button class="btn btn-ok" id="btn-save-risk">保存风控</button>
           <span class="hint">日亏熔断填百分比 (如 30 = 30%); 其余单位 USDT · 改完立即生效</span>
+        </div>
+      </div>
+      <!-- 账户级操作: 仅入口页「账户设置」抽屉显示 (面板视图无设置入口) -->
+      <div class="modal-sec" id="acc-reset-sec" style="display:none; border-top:1px dashed var(--border); margin-top:6px; padding-top:12px;">
+        <div class="modal-sec-title">账户操作</div>
+        <div class="modal-row">
+          <button class="btn btn-warn" id="btn-acc-reset" type="button">重置账户</button>
+          <span class="hint">清空该账户全部持仓 / 成交 / 统计数据并重新从交易所同步; 操作不可恢复</span>
         </div>
       </div>
       <div id="set-msg" class="modal-msg"></div>
