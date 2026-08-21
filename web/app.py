@@ -85,6 +85,12 @@ def create_app(engine) -> FastAPI:
         snap["mainnet"] = engine.mainnet_cap_info()   # 主网分级解锁/限额信息 (横幅与档位展示)
         return snap
 
+    @app.post("/api/logs/clear")
+    async def api_logs_clear():
+        """清空仪表盘操作日志 (前端终端「清屏」按钮调用). 仅清内存中的事件, 不影响持仓/权益."""
+        n = engine.state.clear_events()
+        return {"ok": True, "cleared": n, "msg": f"✅ 已清空 {n} 条日志"}
+
     @app.get("/api/config")
     async def api_config():
         cfg = engine.cfg

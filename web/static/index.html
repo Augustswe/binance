@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Binance 测试网量化仪表盘</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%F0%9F%93%9F%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -263,14 +264,6 @@
     <div id="sig-tab-panels"></div>
   </section>
 
-  <!-- 操作日志 -->
-  <section class="panel">
-    <div class="panel-title">📋 操作日志 <span class="hint">系统每一步动作的时间线（心跳每 5 秒更新，日志自动刷新）</span></div>
-    <div class="log-list" id="log-list">
-      <div class="empty">等待日志…</div>
-    </div>
-  </section>
-
   <!-- 自动学习历史 -->
   <section class="panel">
     <div class="panel-title">🤖 自动学习历史 <span class="hint">每天用最近90天真实行情回测策略池，自动切换最优组合</span></div>
@@ -321,6 +314,31 @@
   <footer class="foot" id="foot">--</footer>
   <div class="disclaimer">📢 开源仅供学习参考 · 非投资建议 · 谨慎使用 · 请勿解除主网分级解锁限额（保护真实资金）</div>
 </main>
+
+<!-- 系统日志终端 (浮动窗口 · 左下角) -->
+<button id="log-term-btn" class="log-term-btn" type="button" title="系统日志 · 点击展开 / 收起" aria-expanded="false">
+  <span class="ltb-icon">▣</span>
+  <span class="ltb-text">系统日志</span>
+  <span class="ltb-badge" id="log-term-badge" hidden>0</span>
+</button>
+
+<div id="log-term" class="log-term" aria-hidden="true">
+  <div class="log-term-head">
+    <div class="log-term-dots"><span></span><span></span><span></span></div>
+    <div class="log-term-title">root@quant:~# 系统日志</div>
+    <div class="log-term-actions">
+      <button id="log-term-clear" class="log-term-mini" type="button" title="清空当前日志">清屏</button>
+      <button id="log-term-close" class="log-term-mini" type="button" title="收起窗口">收起 ▾</button>
+    </div>
+  </div>
+  <div class="log-term-body">
+    <div class="log-list" id="log-list"><div class="empty">等待日志…</div></div>
+  </div>
+  <div class="log-term-foot">
+    <span id="log-term-status">就绪</span>
+    <label class="log-term-as"><input type="checkbox" id="log-term-autoscroll" checked> 自动滚屏</label>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

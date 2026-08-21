@@ -109,6 +109,15 @@ class TradingState:
             if len(self.data["events"]) > 200:
                 self.data["events"] = self.data["events"][-200:]
 
+    def clear_events(self) -> int:
+        """清空操作日志 (清屏用). 返回被清掉的条数, 并落盘 state.json."""
+        with self.lock:
+            n = len(self.data["events"])
+            self.data["events"] = []
+        self.save()
+        self.log.info("操作日志已清空 (移除 %d 条)", n)
+        return n
+
     # ---------------- 成交流水 (下单/卖出) ----------------
     def record_order(self, order: dict) -> None:
         """记录一笔成交 (action: OPEN=下单 / CLOSE=卖出)"""

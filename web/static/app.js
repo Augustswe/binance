@@ -563,29 +563,122 @@ function renderModes(s) {
   tb.innerHTML = html;
 }
 
-// ---------------- 操作日志时间线 ----------------
+// ---------------- 系统日志终端 (浮动窗口) ----------------
 const LOG_TYPE_LABEL = {
   system: "系统", trade: "交易", risk: "风控", tuning: "调参", info: "信息", error: "异常",
 };
 
+// 未读追踪: 按"最新一条日志时间戳"增量计数, 避免被 200/50 上限截断误算
+let _logLastTopTs = null;
+let _logUnread = 0;
+
+function _logTerm() { return document.getElementById("log-term"); }
+function _logTermOpen() {
+  const t = _logTerm();
+  return !!(t && t.classList.contains("open"));
+}
+
+// 展开 / 收起 / 切换
+function openLogTerm() {
+  const t = _logTerm();
+  if (!t) return;
+  t.classList.add("open");
+  t.setAttribute("aria-hidden", "false");
+  const btn = document.getElementById("log-term-btn");
+  if (btn) btn.setAttribute("aria-expanded", "true");
+  _logUnread = 0;            // 打开即已读
+  _updateLogBadge();
+  const list = document.getElementById("log-list");
+  if (list) list.scrollTop = list.scrollHeight;   // 打开即贴底看最新
+  try { localStorage.setItem("log_term_open", "1"); } catch (e) {}
+}
+function closeLogTerm() {
+  const t = _logTerm();
+  if (!t) return;
+  t.classList.remove("open");
+  t.setAttribute("aria-hidden", "true");
+  const btn = document.getElementById("log-term-btn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  try { localStorage.setItem("log_term_open", "0"); } catch (e) {}
+}
+function toggleLogTerm() {
+  _logTermOpen() ? closeLogTerm() : openLogTerm();
+}
+
+function _updateLogBadge() {
+  const b = document.getElementById("log-term-badge");
+  if (!b) return;
+  if (_logUnread > 0) {
+    b.textContent = _logUnread > 99 ? "99+" : String(_logUnread);
+    b.hidden = false;
+  } else {
+    b.hidden = true;
+  }
+}
+
+function _updateLogStatus(n) {
+  const el = document.getElementById("log-term-status");
+  if (!el) return;
+  if (n > 0) {
+    el.textContent = `已记录 ${n} 条 · 实时`;
+    el.className = "log-term-status-on";
+  } else {
+    el.textContent = "暂无日志";
+    el.className = "";
+  }
+}
+
 function renderLogs(s) {
   const list = document.getElementById("log-list");
-  const events = s.events || [];
-  if (!events.length) {
+  if (!list) return;
+  const eventsRaw = s.events || [];   // API 返回: 最新在前 (state.py 已反转)
+
+  // ---- 未读角标: 仅窗口收起时累计, 打开即清零 ----
+  if (eventsRaw.length) {
+    const topTs = eventsRaw[0].ts;
+    if (_logLastTopTs !== null && topTs > _logLastTopTs) {
+      _logUnread += eventsRaw.filter((e) => e.ts > _logLastTopTs).length;
+    }
+    _logLastTopTs = topTs;
+  }
+  if (_logTermOpen()) _logUnread = 0;
+  _updateLogBadge();
+
+  if (!eventsRaw.length) {
     list.innerHTML = `<div class="empty">暂无日志（系统启动后自动记录每一步操作）</div>`;
+    _updateLogStatus(0);
     return;
   }
+
+  // ---- 终端呈现: 最新在底部, 智能贴底 (不打扰向上翻看) ----
+  const asEl = document.getElementById("log-term-autoscroll");
+  const autoscrollOn = !asEl || asEl.checked;
+  const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const termOpen = _logTermOpen();
+  const stick = !termOpen || (autoscrollOn && nearBottom);
+
+  const events = eventsRaw.slice().reverse();  // 最新落底
   let html = "";
   for (const e of events) {
     const clsName = "log-item " + e.type + (e.type === "trade" && e.msg.includes("🔻") ? " neg" : "");
-    html += `<div class="${clsName}">
-      <span class="lt">${fmtTime(e.ts)}</span>
-      <span class="ltype" style="color:var(--muted);font-size:12px">[${LOG_TYPE_LABEL[e.type] || e.type}]</span>
-      <span class="lmsg">${escapeHtml(e.msg)}</span>
-    </div>`;
+    html += `<div class="${clsName}">`
+      + `<span class="lt">${fmtTime(e.ts)}</span>`
+      + `<span class="ltype">[${LOG_TYPE_LABEL[e.type] || e.type}]</span>`
+      + `<span class="lmsg">${escapeHtml(e.msg)}</span>`
+      + `</div>`;
   }
   list.innerHTML = html;
-  list.scrollTop = 0;
+  if (stick) list.scrollTop = list.scrollHeight;
+  _updateLogStatus(eventsRaw.length);
+}
+
+async function clearLogTerm() {
+  const list = document.getElementById("log-list");
+  if (list) list.innerHTML = `<div class="empty">已清屏, 等待新日志…</div>`;
+  _updateLogStatus(0);
+  try {
+    await fetch("/api/logs/clear", { method: "POST" });
+  } catch (e) { /* 离线不阻塞 UI */ }
 }
 
 function escapeHtml(s) {
@@ -722,6 +815,27 @@ document.addEventListener("DOMContentLoaded", () => {
   startHeartbeatTicker();
   loadLearner();
   setInterval(loadLearner, 30000);
+
+  // ---------------- 系统日志终端 (浮动窗口) ----------------
+  const logBtn = document.getElementById("log-term-btn");
+  if (logBtn) logBtn.addEventListener("click", toggleLogTerm);
+  const logClose = document.getElementById("log-term-close");
+  if (logClose) logClose.addEventListener("click", closeLogTerm);
+  const logClear = document.getElementById("log-term-clear");
+  if (logClear) logClear.addEventListener("click", clearLogTerm);
+  const logAs = document.getElementById("log-term-autoscroll");
+  if (logAs) logAs.addEventListener("change", () => {
+    // 重新贴底一次, 立即反馈勾选
+    const list = document.getElementById("log-list");
+    if (logAs.checked && list) list.scrollTop = list.scrollHeight;
+  });
+  // 记忆上次的展开/收起状态 (刷新页面不丢失)
+  try {
+    if (localStorage.getItem("log_term_open") === "1") {
+      openLogTerm();
+      if (typeof lastSnapshot !== "undefined" && lastSnapshot) renderLogs(lastSnapshot);
+    }
+  } catch (e) { /* localStorage 不可用时忽略 */ }
   $("btn-pause").addEventListener("click", async () => {
     const paused = $("btn-pause").textContent === "暂停";
     await fetch("/api/control", {
