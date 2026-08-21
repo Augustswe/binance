@@ -10,6 +10,7 @@ from core.indicators import atr_series, trend_strength, vol_ratio
 from core.logger import get_logger
 from .base import StrategyContext
 from .bollinger import BollingerStrategy
+from .leverage import compute_leverage
 from .grid import GridStrategy
 from .ma_cross import MACrossStrategy
 from .rsi import RSIStrategy
@@ -120,16 +121,13 @@ class StrategyEngine:
         if scores:
             dominant = max(scores, key=lambda n: abs(scores[n]))
 
-        # ---- 动态杠杆 (波动率越高杠杆越低) ----
+        # ---- 动态杠杆: 统一按信号强度自适应 (不再区分 auto/fixed, 恒为强弱逻辑) ----
         lev_cfg = self.cfg.get("leverage", {})
         lev_min = int(lev_cfg.get("min", 1))
         lev_max = int(lev_cfg.get("max", 5))
-        if lev_cfg.get("mode", "auto") == "fixed":
-            leverage = max(lev_min, min(lev_max, int(lev_cfg.get("fixed", lev_max))))
-        else:
-            # 基准3倍, 波动放大则降杠杆, 波动收窄可升杠杆
-            lev = round(3.0 / max(vr, 0.4))
-            leverage = max(lev_min, min(lev_max, lev))
+        pos_sl_atr = float(self.cfg.get("position", {}).get("sl_atr", 2.7))
+        sl_pct = pos_sl_atr * atr_now / last_price if last_price > 0 else 0.0
+        leverage = compute_leverage(abs(combined), sl_pct, lev_min, lev_max)
 
         return AnalysisResult(
             symbol=symbol, regime=regime, scores=scores, weights=weights,

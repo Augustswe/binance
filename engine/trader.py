@@ -1234,7 +1234,7 @@ class TradingEngine:
         d = self.state.data
         exposure = self.state.exposure()
         leverage = max(1, int(getattr(sig, "leverage", 1)))
-        lev_max = 5
+        lev_max = int(self.cfg.get("leverage", {}).get("max", 5))
         weight = self.modes.weight_of(mode)
         max_single = float(self.cfg["risk"]["max_single_order_notional"])
         margin_base = float(self.cfg["risk"].get(

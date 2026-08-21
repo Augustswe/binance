@@ -10,6 +10,8 @@ import time
 
 import numpy as np
 
+from .leverage import compute_leverage
+
 from core.indicators import atr
 from core.logger import get_logger
 
@@ -56,8 +58,8 @@ class DonchianEngine:
         self.entry_n = int(d.get("entry_n", 55))
         self.exit_n = int(d.get("exit_n", 20))
         self.sl_atr = float(d.get("sl_atr", 2.5))
-        # 动态杠杆配置: 强信号高倍开单, 弱信号低倍试错
-        lev_cfg = d.get("leverage", {}) or {}
+        # 动态杠杆配置: 强信号高倍开单, 弱信号低倍试错 (全局预设, 见顶层 leverage.min/max)
+        lev_cfg = cfg.get("leverage", {}) or {}
         self.lev_min = int(lev_cfg.get("min", 1))
         self.lev_max = int(lev_cfg.get("max", 5))
         self.log = get_logger("donchian")
@@ -96,19 +98,12 @@ class DonchianEngine:
         else:
             action, sl = None, 0.0
 
-        # 动态杠杆: 强信号高倍开单, 弱信号低倍试错
-        # strength 0.15 以下 = 试探仓(最低杠杆), 0.6 以上 = 重仓(最高杠杆), 中间线性
+        # 动态杠杆: 强信号高倍, 弱信号低倍 (统一 compute_leverage, 受用户预设 [min,max] + 强平安全帽约束)
         if action:
-            t = max(0.0, min(1.0, (strength - 0.15) / 0.45))
-            leverage = max(self.lev_min, min(
-                self.lev_max, int(round(self.lev_min + t * (self.lev_max - self.lev_min)))
-            ))
-            # 风控: 止损距离不能太接近强平线 (杠杆过高会被先强平)
-            # 强平距离 ≈ 100%/杠杆, 要求 止损距离 >= 50% 强平距离
-            sl_pct = self.sl_atr * a / c if c > 0 else 0.0
-            if sl_pct > 0:
-                max_safe = max(1, int(0.5 / sl_pct))
-                leverage = max(self.lev_min, min(leverage, max_safe))
+            sl_pct = (self.sl_atr * a / c) if c > 0 else 0.0
+            leverage = compute_leverage(strength, sl_pct, self.lev_min, self.lev_max)
+        else:
+            leverage = self.lev_min
 
         regime = "trend_up" if action == "LONG" else ("trend_down" if action == "SHORT" else "ranging")
         return DonchianSignal(

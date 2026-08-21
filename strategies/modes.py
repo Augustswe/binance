@@ -20,6 +20,7 @@ import numpy as np
 from core.indicators import atr_series, trend_strength, vol_ratio
 from core.logger import get_logger
 from strategies.base import StrategyContext
+from strategies.leverage import compute_leverage
 from strategies.bollinger import BollingerStrategy
 from strategies.donchian import DonchianEngine
 from strategies.grid import GridStrategy
@@ -145,7 +146,11 @@ class ModeManager:
             score = float(strat.compute(ctx))
             action = "LONG" if score >= OPEN_TH_DEFAULT else ("SHORT" if score <= -OPEN_TH_DEFAULT else None)
             lev_cfg = self.cfg.get("leverage", {})
-            lev = max(int(lev_cfg.get("min", 1)), min(int(lev_cfg.get("max", 5)), int(lev_cfg.get("fixed", 3))))
+            lev_min = int(lev_cfg.get("min", 1))
+            lev_max = int(lev_cfg.get("max", 5))
+            pos_sl_atr = float(self.cfg.get("position", {}).get("sl_atr", 2.7))
+            sl_pct = pos_sl_atr * ctx.atr / ctx.last_price if ctx.last_price > 0 else 0.0
+            lev = compute_leverage(abs(score), sl_pct, lev_min, lev_max)
             return ModeSignal(
                 mode=mode, action=action, score=score, atr=ctx.atr, atr_pct=ctx.atr_pct,
                 leverage=lev, strength=abs(score),
