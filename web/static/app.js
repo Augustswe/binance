@@ -673,6 +673,7 @@ function renderLogs(s) {
 }
 
 async function clearLogTerm() {
+  if (!confirm("确认清屏？此操作会清空全部系统日志且不可恢复。")) return;
   const list = document.getElementById("log-list");
   if (list) list.innerHTML = `<div class="empty">已清屏, 等待新日志…</div>`;
   _updateLogStatus(0);
