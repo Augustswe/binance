@@ -279,7 +279,7 @@ function tpSlCell(p) {
   const activeTag = active ? '<span class="tpsl-active-tag">● 已生效</span>' : "";
   return `<div class="tpsl-cell">
     <button class="tpsl-btn ${open ? "open" : ""}" data-sym="${p.symbol}" title="${open ? "收起止盈止损编辑器" : "点击设置市价止盈止损 (触发即市价成交)"}">
-      <span class="bolt">⚡</span> ${open ? "收起 ▲" : "市价止盈止损"}
+      ${open ? "收起 ▲" : "市价止盈止损"}
     </button>
     ${cur}
     ${activeTag}
