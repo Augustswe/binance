@@ -274,7 +274,7 @@ def create_app(manager: AccountManager) -> FastAPI:
             return {"ok": False, "error": f"当前无 {sym} 持仓"}
         mark = d["prices"].get(sym, 0.0)
         try:
-            trade = await e.execution.close_position(sym, mark, "手动市价平仓")
+            trade = await e.execution.close_position(sym, mark, f"手动市价平仓 @{mark:.2f}")
         except Exception as ex:
             return {"ok": False, "error": f"平仓失败: {str(ex)[:200]}"}
         if not trade:

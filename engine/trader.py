@@ -713,26 +713,26 @@ class TradingEngine:
             if pos["side"] == "LONG":
                 if pos.get("tp") and p >= pos["tp"]:
                     self._log_exit_trigger(sym, pos, "LONG", "tp", p, pos["tp"], trailing)
-                    reason = "手动止盈TP" if pos.get("manual_tp_active") else "固定止盈TP"
+                    reason = ("手动止盈TP" if pos.get("manual_tp_active") else "固定止盈TP") + f" @{p:.2f}"
                     trade = await self.execution.close_position(sym, p, reason)
                     if trade:
                         await self._notify_close(trade)
                 elif pos.get("sl") and p <= pos["sl"]:
                     self._log_exit_trigger(sym, pos, "LONG", "sl", p, pos["sl"], trailing)
-                    reason = "手动止损SL" if pos.get("manual_sl_active") else ("移动止损SL" if trailing else "固定止损SL")
+                    reason = ("手动止损SL" if pos.get("manual_sl_active") else ("移动止损SL" if trailing else "固定止损SL")) + f" @{p:.2f}"
                     trade = await self.execution.close_position(sym, p, reason)
                     if trade:
                         await self._notify_close(trade)
             else:
                 if pos.get("tp") and p <= pos["tp"]:
                     self._log_exit_trigger(sym, pos, "SHORT", "tp", p, pos["tp"], trailing)
-                    reason = "手动止盈TP" if pos.get("manual_tp_active") else "固定止盈TP"
+                    reason = ("手动止盈TP" if pos.get("manual_tp_active") else "固定止盈TP") + f" @{p:.2f}"
                     trade = await self.execution.close_position(sym, p, reason)
                     if trade:
                         await self._notify_close(trade)
                 elif pos.get("sl") and p >= pos["sl"]:
                     self._log_exit_trigger(sym, pos, "SHORT", "sl", p, pos["sl"], trailing)
-                    reason = "手动止损SL" if pos.get("manual_sl_active") else ("移动止损SL" if trailing else "固定止损SL")
+                    reason = ("手动止损SL" if pos.get("manual_sl_active") else ("移动止损SL" if trailing else "固定止损SL")) + f" @{p:.2f}"
                     trade = await self.execution.close_position(sym, p, reason)
                     if trade:
                         await self._notify_close(trade)
@@ -929,18 +929,18 @@ class TradingEngine:
                 if mode == pos_mode:
                     if mode == "donchian" and self.donchian:
                         if self.donchian.check_exit(klines, pos):
-                            trade = await self.execution.close_position(symbol, mark, "通道反向出场")
+                            trade = await self.execution.close_position(symbol, mark, f"通道反向出场 @{mark:.2f}")
                             if trade:
                                 await self._notify_close(trade)
                     elif mode != "donchian":
                         close_th = float(self.cfg["signal"].get("close_threshold", 0.0))
                         if close_th > 0:
                             if pos["side"] == "LONG" and sig.score < close_th:
-                                trade = await self.execution.close_position(symbol, mark, "信号消失")
+                                trade = await self.execution.close_position(symbol, mark, f"信号消失 @{mark:.2f}")
                                 if trade:
                                     await self._notify_close(trade)
                             elif pos["side"] == "SHORT" and sig.score > -close_th:
-                                trade = await self.execution.close_position(symbol, mark, "信号消失")
+                                trade = await self.execution.close_position(symbol, mark, f"信号消失 @{mark:.2f}")
                                 if trade:
                                     await self._notify_close(trade)
 
@@ -1264,22 +1264,26 @@ class TradingEngine:
             sl = price - sign * max(sl_atr * sig.atr, min_sl)
 
         strategy = f"{mode}-{sig.regime}"
+        # 真实开仓原因 (用于成交记录, 不再只写策略名): 触发策略 + 方向 + 信号强度/市况 + 入场/止损/止盈
+        trigger_phrase = {
+            "donchian": "唐奇安通道突破(趋势跟踪)",
+            "multi": "多策略综合评分转正(自适应)",
+            "grid": "价格触及网格边界(均值回归)",
+            "ma_cross": "均线金叉/死叉",
+            "rsi": "RSI 超卖/超买反转",
+            "bollinger": "布林带触轨/开口",
+        }.get(mode, mode)
+        side_cn = "做多" if side == "LONG" else "做空"
+        open_reason = (f"{trigger_phrase} {side_cn} | 强度{sig.strength:.2f} 市况{sig.regime} | "
+                       f"入场{price:.2f} 止损{sl:.2f}" + (f" 止盈{tp:.2f}" if tp else " 移动止损"))
         ok = await self.execution.open_position(
-            symbol, side, qty, price, leverage, notional, tp, sl, sig.atr, strategy
+            symbol, side, qty, price, leverage, notional, tp, sl, sig.atr, strategy,
+            open_reason=open_reason,
         )
         if ok:
             mode_label = {"donchian": "Donchian", "multi": "多策略", "grid": "网格",
                           "ma_cross": "均线", "rsi": "RSI", "bollinger": "布林带"}.get(mode, mode)
             # 开仓原因: 触发策略 + 关键信号, 落到引擎日志 (便于复盘为什么开这仓)
-            trigger_phrase = {
-                "donchian": "唐奇安通道突破(趋势跟踪)",
-                "multi": "多策略综合评分转正(自适应)",
-                "grid": "价格触及网格边界(均值回归)",
-                "ma_cross": "均线金叉/死叉",
-                "rsi": "RSI 超卖/超买反转",
-                "bollinger": "布林带触轨/开口",
-            }.get(mode, mode)
-            side_cn = "做多" if side == "LONG" else "做空"
             self.log.info(
                 "[%s] 开仓原因[%s]: %s %s | 触发:%s 强度=%.2f 评分=%.2f 市况=%s | "
                 "入场=%.2f ATR=%.2f(%.2f%%) 止损=%.2f%s",

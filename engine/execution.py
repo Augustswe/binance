@@ -12,7 +12,7 @@ class BaseExecution:
         self.log = get_logger("execution")
 
     async def open_position(self, symbol, side, qty, price, leverage, notional,
-                            tp, sl, atr, strategy) -> bool:
+                            tp, sl, atr, strategy, open_reason=None) -> bool:
         raise NotImplementedError
 
     async def close_position(self, symbol, exit_price, reason) -> dict | None:
@@ -23,10 +23,11 @@ class PaperExecution(BaseExecution):
     """模拟下单: 按当前价格直接成交, 扣除双边手续费"""
 
     async def open_position(self, symbol, side, qty, price, leverage, notional,
-                            tp, sl, atr, strategy) -> bool:
+                            tp, sl, atr, strategy, open_reason=None) -> bool:
         self.state.open_position(
             symbol=symbol, side=side, qty=qty, entry=price, leverage=leverage,
             notional=notional, upnl=0.0, tp=tp, sl=sl, atr=atr, strategy=strategy,
+            open_reason=open_reason,
         )
         self.log.info("[paper] 开仓 %s %s %s@%.2f 杠杆%d 名义%.0fU TP=%.2f SL=%.2f (策略:%s)",
                       symbol, side, qty, price, leverage, notional, tp, sl, strategy)
@@ -63,7 +64,7 @@ class LiveExecution(BaseExecution):
             self.log.warning("[%s] 设置杠杆失败: %s", symbol, e)
 
     async def open_position(self, symbol, side, qty, price, leverage, notional,
-                            tp, sl, atr, strategy) -> bool:
+                            tp, sl, atr, strategy, open_reason=None) -> bool:
         try:
             self._setup_margin(symbol, leverage)
             order_side = "BUY" if side == "LONG" else "SELL"
@@ -74,6 +75,7 @@ class LiveExecution(BaseExecution):
                 symbol=symbol, side=side, qty=fill_qty, entry=fill_price,
                 leverage=leverage, notional=fill_qty * fill_price, upnl=0.0,
                 tp=tp, sl=sl, atr=atr, strategy=strategy,
+                open_reason=open_reason,
             )
             self.log.info("[live] 开仓 %s %s %.4f@%.2f 杠杆%d (策略:%s)",
                           symbol, order_side, fill_qty, fill_price, leverage, strategy)

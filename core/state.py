@@ -207,7 +207,8 @@ class TradingState:
     def open_position(self, symbol: str, side: str, qty: float, entry: float,
                       leverage: int, notional: float, upnl: float,
                       tp: float, sl: float, atr: float, strategy: str,
-                      record: bool = True, ts: float | None = None) -> None:
+                      record: bool = True, ts: float | None = None,
+                      open_reason: str | None = None) -> None:
         with self.lock:
             self.data["positions"][symbol] = {
                 "side": side,              # LONG / SHORT
@@ -242,7 +243,7 @@ class TradingState:
                     "notional": notional,
                     "fees": None,
                     "pnl": None,
-                    "reason": strategy,
+                    "reason": open_reason or strategy,
                 })
 
     def close_position(self, symbol: str, exit_price: float, reason: str,
