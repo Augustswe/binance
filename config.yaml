@@ -28,7 +28,7 @@ run_mode: auto
 # 多模式并行 (可多选): donchian / multi / grid / ma_cross / rsi / bollinger
 # 每个模式独立开仓独立统计, 同币种竞争制(先到先得), 系统按实盘表现分配资金权重
 modes:
-  enabled: [donchian, multi, grid, ma_cross, rsi, bollinger]
+  enabled: [donchian, multi, ma_cross, rsi, bollinger]
   # 资金权重由学习器自动更新 (赚钱的模式权重高), 也可手动指定:
   # weights:
   #   donchian: 1.0
