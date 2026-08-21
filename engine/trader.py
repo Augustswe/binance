@@ -110,6 +110,7 @@ class TradingEngine:
             cfg, self.state, self.exchange
         )
         self.symbols = cfg["symbols"]
+        self.allow_short = bool(cfg.get("allow_short", True))  # 只做多: False=禁止开做空单(负评分信号)
         self.poll_interval = float(cfg.get("poll_interval", 5))
         self.kline_limit = int(cfg.get("kline_limit", 300))
         self._stop = asyncio.Event()
@@ -967,6 +968,11 @@ class TradingEngine:
         # ============ 模式分析/开仓 ============
         # 同币种竞争制: 该币种已有任何模式的持仓 → 只做该持仓的出场管理, 不再开新仓
         pos = d["positions"].get(symbol)
+        # 只做多模式: 持仓为做空且禁止做空 -> 平掉空单并跳过本轮该币种
+        if pos and pos.get("side") == "SHORT" and not self.allow_short:
+            self.log.info("\U0001F6AB 只做多: 平掉 %s 做空持仓(负评分)", symbol)
+            await self.execution.close_position(symbol, mark, "只做多模式: 平空单")
+            return
         # 元模式(meta-mode)说明:
         #   - "multi" (多策略) 本身不是具体策略, 不产生自身信号; 它 = 从所有具体策略中"挑选一个最优"开仓
         #   - "auto"  (自动并行) = 每个具体策略独立分析, 谁先触发谁开仓 (同币种竞争, 抢到即止)
@@ -1010,7 +1016,11 @@ class TradingEngine:
                         if sig.action == "LONG":
                             await self._try_open_mode(mode, symbol, "LONG", mark, sig)
                         elif sig.action == "SHORT":
-                            await self._try_open_mode(mode, symbol, "SHORT", mark, sig)
+                            if self.allow_short:
+                                await self._try_open_mode(mode, symbol, "SHORT", mark, sig)
+                            else:
+                                self.log.info("\U0001F6AB 只做多: 跳过 %s 做空信号(负评分)", symbol)
+
                         if d["positions"].get(symbol):
                             break
             else:
@@ -1039,7 +1049,11 @@ class TradingEngine:
             if best_sig.action == "LONG":
                 await self._try_open_mode(best_mode, symbol, "LONG", mark, best_sig)
             elif best_sig.action == "SHORT":
-                await self._try_open_mode(best_mode, symbol, "SHORT", mark, best_sig)
+                if self.allow_short:
+                    await self._try_open_mode(best_mode, symbol, "SHORT", mark, best_sig)
+                else:
+                    self.log.info("\U0001F6AB 只做多: 跳过 %s 做空信号(负评分)", symbol)
+
 
     async def _try_open(self, symbol: str, side: str, price: float, result):
         d = self.state.data
