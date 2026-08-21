@@ -318,7 +318,18 @@
             <label>冷静期 (分钟)</label>
             <input type="number" id="risk-cooldown" class="input" min="0" step="5">
           </div>
+          <div class="risk-field">
+            <label>总敞口占权益 (%)</label>
+            <select id="risk-exposure-pct" class="input">
+              <option value="0">关闭</option>
+              <option value="20">20%</option>
+              <option value="40">40%</option>
+              <option value="60">60%</option>
+              <option value="80">80%</option>
+            </select>
+          </div>
         </div>
+        <div id="exposure-pct-warn" class="risk-warn" style="display:none"></div>
         <div class="modal-row risk-lev-row">
           <span class="modal-label" style="width:auto">杠杆</span>
           <select id="risk-lev-mode" class="input risk-select">

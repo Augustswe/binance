@@ -23,6 +23,17 @@ class RiskManager:
             return False, f"单笔{notional:.0f}U 超过上限 {self.risk['max_single_order_notional']}U"
         if state.exposure() + notional > self.risk["max_total_position_notional"]:
             return False, "总持仓超过上限"
+        # 总持仓敞口占权益上限 (max_total_exposure_pct, 0=关闭)
+        pct = self.risk.get("max_total_exposure_pct", 0) or 0
+        if pct > 0:
+            eq = state.equity()
+            if eq > 0:
+                projected = state.exposure() + notional
+                if projected > eq * pct / 100.0:
+                    return False, (
+                        f"总敞口占权益 {projected / eq * 100:.0f}% "
+                        f"超过上限 {pct:.0f}%"
+                    )
         if len(d["positions"]) >= self.risk["max_positions"]:
             return False, "持仓数量达到上限"
         # 日亏损熔断

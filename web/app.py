@@ -439,12 +439,15 @@ def create_app(manager: AccountManager) -> FastAPI:
         risk_out: dict = {}
         raw_risk = body.risk or {}
         int_keys = ("max_single_order_notional", "max_total_position_notional",
-                    "margin_per_position", "max_positions", "cooldown_minutes")
+                    "margin_per_position", "max_positions", "cooldown_minutes",
+                    "max_total_exposure_pct")
         for k in int_keys:
             if k in raw_risk:
                 v = to_int(raw_risk[k])
                 if v is None or v < 0:
                     return {"ok": False, "msg": f"❌ 风控项 {k} 需为非负整数"}
+                if k == "max_total_exposure_pct" and v > 100:
+                    return {"ok": False, "msg": "❌ 总敞口占权益需在 0~100 之间 (0=关闭)"}
                 risk_out[k] = v
         if "daily_loss_stop" in raw_risk:
             v = to_float(raw_risk["daily_loss_stop"])

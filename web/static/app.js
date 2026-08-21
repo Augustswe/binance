@@ -1247,6 +1247,8 @@ function initSettings() {
     loadSettings();
   });
   $("btn-save-risk").addEventListener("click", saveRisk);
+  const expPctSel = document.getElementById("risk-exposure-pct");
+  if (expPctSel) expPctSel.addEventListener("change", updateExposurePctWarn);
   document.querySelectorAll(".net-opt").forEach(b => {
     b.addEventListener("click", () => {
       const target = b.dataset.net;
@@ -1474,10 +1476,37 @@ function initSettings() {
     setVal("risk-positions", r.max_positions);
     setVal("risk-dd", r.daily_loss_stop != null ? Math.round(r.daily_loss_stop * 100) : "");
     setVal("risk-cooldown", r.cooldown_minutes);
+    setVal("risk-exposure-pct", r.max_total_exposure_pct != null ? r.max_total_exposure_pct : 0);
+    updateExposurePctWarn();
     setVal("risk-lev-mode", l.mode);
     setVal("risk-lev-min", l.min);
     setVal("risk-lev-max", l.max);
     setVal("risk-lev-fixed", l.fixed);
+  }
+
+  // 总敞口占权益 分级实时警告: 关闭 / ≤40% 稳健 / 60% 激进(琥珀) / 80% 极高风险(红)
+  function updateExposurePctWarn() {
+    const el = document.getElementById("exposure-pct-warn");
+    if (!el) return;
+    const sel = document.getElementById("risk-exposure-pct");
+    const v = sel ? (parseInt(sel.value, 10) || 0) : 0;
+    let cls = "", msg = "";
+    if (v === 0) {
+      msg = "未启用「总敞口占权益」限制 — 仍由上方「总持仓上限 (U)」控制开仓额度";
+      cls = "warn-off";
+    } else if (v <= 40) {
+      msg = (v === 20 ? "✅ 保守档" : "✅ 平衡档") + `：开仓后总敞口不超过权益的 ${v}%`;
+      cls = "warn-ok";
+    } else if (v <= 60) {
+      msg = `⚠️ 激进档：总敞口达权益 ${v}%，单笔回撤会快速放大，极端行情下回撤明显`;
+      cls = "warn-amber";
+    } else {
+      msg = `🔴 极高风险：接近满仓（${v}%），一次黑天鹅即可大幅回撤甚至穿仓，不建议开启`;
+      cls = "warn-red";
+    }
+    el.className = "risk-warn " + cls;
+    el.textContent = msg;
+    el.style.display = "block";
   }
 
   async function saveRisk() {
@@ -1489,6 +1518,10 @@ function initSettings() {
       max_positions: num("risk-positions"),
       daily_loss_stop: num("risk-dd") != null ? num("risk-dd") / 100 : null,
       cooldown_minutes: num("risk-cooldown"),
+      max_total_exposure_pct: (() => {
+        const sel = document.getElementById("risk-exposure-pct");
+        return sel ? (parseInt(sel.value, 10) || 0) : 0;
+      })(),
     };
     Object.keys(risk).forEach(k => { if (risk[k] == null) delete risk[k]; });
     const leverage = {

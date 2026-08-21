@@ -1220,6 +1220,12 @@ class TradingEngine:
         # 名义价值 = 保证金 × 杠杆 × 模式权重
         budget = min(margin_base * leverage * weight, max_single,
                      float(self.cfg["risk"]["max_total_position_notional"]) - exposure)
+        # 总持仓敞口占权益上限 (max_total_exposure_pct, 0=关闭): 叠加权益比例封顶
+        exposure_pct_cap = float(self.cfg["risk"].get("max_total_exposure_pct", 0) or 0)
+        if exposure_pct_cap > 0:
+            eq = self.state.equity()
+            if eq > 0:
+                budget = min(budget, eq * exposure_pct_cap / 100.0 - exposure)
         if budget <= 0:
             return
         # 主网分级限额: 总持仓不得超过当前档位 cap (500/1000/自定义)

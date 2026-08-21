@@ -232,6 +232,25 @@ body.modal-open { overflow: hidden; }
 .risk-field .input { min-width: 0; width: 100%; }
 .risk-lev-row { align-items: center; }
 .risk-select { min-width: 110px; flex: 0 0 auto; }
+
+/* 总敞口占权益 分级警告 */
+.risk-warn {
+  margin-top: 8px; padding: 8px 12px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 600; line-height: 1.5;
+  border: 1px solid var(--border); background: var(--panel2);
+}
+.risk-warn.warn-off { color: var(--muted); background: var(--panel2); border-color: var(--border); font-weight: 400; }
+.risk-warn.warn-ok { color: var(--green); background: var(--green-bg); border-color: var(--green); }
+.risk-warn.warn-amber { color: var(--yellow); background: rgba(240,185,11,.12); border-color: var(--yellow); }
+.risk-warn.warn-red {
+  color: #fff; background: var(--red); border-color: var(--red);
+  box-shadow: 0 2px 12px rgba(239,83,80,.4);
+  animation: warn-blink 1.4s ease-in-out infinite;
+}
+@keyframes warn-blink {
+  0%, 100% { box-shadow: 0 2px 12px rgba(239,83,80,.25); }
+  50% { box-shadow: 0 2px 18px rgba(239,83,80,.6); }
+}
 .risk-num { min-width: 64px; width: 64px; flex: 0 0 auto; }
 .btn-ok { background: var(--green); color: #fff; border: none; }
 .btn-ok:hover { filter: brightness(1.1); }
