@@ -24,7 +24,7 @@ strategy_mode: donchian
 #   <策略> = 只让指定策略开仓, 例如 donchian / multi / grid / ma_cross / rsi / bollinger
 # 信号面板始终展示所有启用模式的判断; 仅"开仓权"受此值约束
 run_mode: auto
-allow_short: false   # 只做多: 禁止开做空单(即负评分信号); 设为 true 恢复允许做空
+allow_short: true   # 只做多: 禁止开做空单(即负评分信号); 设为 true 恢复允许做空
 
 # 多模式并行 (可多选): donchian / multi / grid / ma_cross / rsi / bollinger
 # 每个模式独立开仓独立统计, 同币种竞争制(先到先得), 系统按实盘表现分配资金权重
