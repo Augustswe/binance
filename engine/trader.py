@@ -49,10 +49,11 @@ def _resolve_manual(entry: float, sign: float, spec: dict, is_tp: bool) -> float
 
 
 class TradingEngine:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, state_file=None, name=None):
         self.cfg = cfg
+        self.name = name or "default"
         self.log = get_logger("trader")
-        self.state = TradingState(cfg)
+        self.state = TradingState(cfg, state_file=state_file)
         self.exchange = BinanceFutures(cfg)
         self.risk = RiskManager(cfg)
         self.strategy_engine = StrategyEngine(cfg)
@@ -153,7 +154,7 @@ class TradingEngine:
                       self.cfg["mode"], self.timeframe, self.symbols)
         self.state.add_event(
             "system",
-            f"🚀 系统启动 | 模式 {'LIVE 测试网' if self.cfg['mode'] == 'live' else 'PAPER 模拟'} | "
+            f"🚀 [{self.name}] 系统启动 | 模式 {'LIVE 测试网' if self.cfg['mode'] == 'live' else 'PAPER 模拟'} | "
             f"周期 {self.timeframe} | 交易对 {', '.join(self.symbols)}",
         )
         await self._notify(
@@ -238,7 +239,8 @@ class TradingEngine:
         return {"ok": True, "symbols": symbols, "added": sorted(added), "removed": sorted(removed)}
 
     def update_api(self, key: str = "", secret: str = "",
-                   mainnet_key: str = "", mainnet_secret: str = "") -> dict:
+                   mainnet_key: str = "", mainnet_secret: str = "",
+                   key_env: str | None = None, secret_env: str | None = None) -> dict:
         """热更新 API Key/Secret (Web 设置面板): 写 .env + 更新内存
 
         - key/secret         → 测试网 (BINANCE_TESTNET_API_KEY/SECRET)
@@ -247,11 +249,14 @@ class TradingEngine:
         """
         key, secret = key.strip(), secret.strip()
         mainnet_key, mainnet_secret = mainnet_key.strip(), mainnet_secret.strip()
-        from core.config import update_env_api, update_env_mainnet_api
+        from core.config import update_env_api, update_env_mainnet_api, update_env_named
 
         if key or secret:
             try:
-                update_env_api(key, secret)
+                if key_env:
+                    update_env_named(key_env, secret_env, key, secret)
+                else:
+                    update_env_api(key, secret)
             except Exception as e:
                 return {"ok": False, "msg": f"❌ 写入 .env (测试网) 失败: {e}"}
             self.cfg["api"]["key"] = key

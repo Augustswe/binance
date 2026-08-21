@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .env
 data/state.json
+data/accounts/
+accounts.yaml
 data/learner_state.json
 logs/*.log
 logs/app.pid

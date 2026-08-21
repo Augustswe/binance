@@ -15,6 +15,16 @@ const fmtQty = (v) => (v == null || isNaN(v)) ? "--" : Number(Number(v).toFixed(
 const cls = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
 const sign = (v) => (v > 0 ? "+" : "");
 
+// ---------------- 多账户: ?account= 解析 ----------------
+// 带 account 参数 → 单账户策略面板; 否则走入口页 (fetch 不带 account)。
+const ACCOUNT = (() => { try { return new URLSearchParams(location.search).get("account"); } catch (e) { return null; } })();
+const QS = ACCOUNT ? "account=" + encodeURIComponent(ACCOUNT) : "";
+// 给所有面板 API 调用追加 ?account=<name>, 让后端路由到对应子引擎
+function apiUrl(path) {
+  if (!QS) return path;
+  return path + (path.includes("?") ? "&" : "?") + QS;
+}
+
 function scoreBar(v) {
   if (v == null || isNaN(v)) return "";
   const pct = Math.max(-100, Math.min(100, v * 100));
@@ -38,7 +48,7 @@ function fmtTime(ts) {
 
 async function loadConfig() {
   try {
-    const r = await fetch("/api/config");
+    const r = await fetch(apiUrl("/api/config"));
     cfg = await r.json();
     $("mode-badge").textContent = cfg.mode === "live" ? "LIVE 测试网" : "PAPER 模拟";
     $("mode-badge").className = "badge " + (cfg.mode === "live" ? "badge-live" : "badge-paper");
@@ -65,7 +75,7 @@ function updateNetBanner() {
 let lastLearnerKey = null;
 async function loadLearner() {
   try {
-    const r = await fetch("/api/learner");
+    const r = await fetch(apiUrl("/api/learner"));
     const d = await r.json();
     if (!d.current) {
       $("learner-head").textContent = "尚无学习记录（系统启动后自动学习一轮）";
@@ -116,7 +126,7 @@ async function loadLearner() {
 async function refresh() {
   let s;
   try {
-    const r = await fetch("/api/state");
+    const r = await fetch(apiUrl("/api/state"));
     s = await r.json();
   } catch (e) {
     $("status-badge").textContent = "连接断开";
@@ -134,6 +144,14 @@ async function refresh() {
   // 心跳: 记录后端主循环真实 tick 时间 (不是写死的)
   lastTickTs = s.last_tick_ts || lastTickTs;
   updateHeartbeat();
+
+  // 多账户面板: 标签页标题 = 策略名 (方便区分多个窗口), 顶部显示账户标识
+  document.title = (s.strategy_label || "策略") + " · " + (s.account || "default") + " · Binance量化";
+  const chip = $("account-chip");
+  if (chip) {
+    chip.textContent = "📁 " + (s.account || "default") + " · " + (s.strategy_label || "");
+    chip.style.display = "";
+  }
 
   // API 登录状态徽章
   renderLoginBadge(s.api);
@@ -394,7 +412,7 @@ function opt(sel, val, label) {
 
 async function postManualTPSL(sym, tp, sl) {
   try {
-    const res = await fetch("/api/manual_tp_sl", {
+    const res = await fetch(apiUrl("/api/manual_tp_sl"), {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({symbol: sym, tp, sl}),
@@ -681,7 +699,7 @@ async function clearLogTerm() {
   if (list) list.innerHTML = `<div class="empty">已清屏, 等待新日志…</div>`;
   _updateLogStatus(0);
   try {
-    await fetch("/api/logs/clear", { method: "POST" });
+    await fetch(apiUrl("/api/logs/clear"), { method: "POST" });
   } catch (e) { /* 离线不阻塞 UI */ }
 }
 
@@ -797,7 +815,7 @@ function drawChart(history, dayStart) {
     `最新 ${fmt(values[values.length - 1])} | 最高 ${fmt(max)} | 最低 ${fmt(min)}`;
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+function initPanel(account) {
   loadConfig();
   refresh();
   setInterval(refresh, REFRESH_MS);
@@ -842,14 +860,14 @@ document.addEventListener("DOMContentLoaded", () => {
   } catch (e) { /* localStorage 不可用时忽略 */ }
   $("btn-pause").addEventListener("click", async () => {
     const paused = $("btn-pause").textContent === "暂停";
-    await fetch("/api/control", {
+    await fetch(apiUrl("/api/control"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: paused ? "pause" : "resume" }),
     });
   });
   $("btn-reset").addEventListener("click", async () => {
     if (confirm("重置今日: 以当前权益为新起点并解除熔断?")) {
-      await fetch("/api/control", {
+      await fetch(apiUrl("/api/control"), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "reset_day" }),
       });
@@ -866,7 +884,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loadSettings() {
     try {
-      const r = await fetch("/api/settings");
+      const r = await fetch(apiUrl("/api/settings"));
       settingsData = await r.json();
       const api = settingsData.api || {};
       let statusText;
@@ -926,6 +944,19 @@ function renderModeSettings() {
     const tag = $("set-run-mode-tag");
     if (tag) tag.textContent = runMode === "auto" ? "自动并行" : (MODE_LABELS[runMode] || runMode);
   }
+  // 多账户: 非 default 账户策略已绑定, 隐藏切换器并展示只读徽章
+  const lockedNote = $("run-mode-locked");
+  if (lockedNote) {
+    if (settingsData.strategy_locked) {
+      if (sel) sel.style.display = "none";
+      const lbl = settingsData.strategy_label || (MODE_LABELS[runMode] || runMode);
+      lockedNote.innerHTML = `🔒 该账户策略已固定为 <b>${escapeHtml(lbl)}</b>，不可在面板热改。如需更换策略，请到入口主页「重置账户」后重新绑定。`;
+      lockedNote.style.display = "block";
+    } else {
+      if (sel) sel.style.display = "";
+      lockedNote.style.display = "none";
+    }
+  }
 }
 
 async function saveRunMode() {
@@ -933,7 +964,7 @@ async function saveRunMode() {
   if (!sel) return;
   const mode = sel.value;
   setMsg("保存运行模式中…");
-  const res = await fetch("/api/settings/run_mode", {
+  const res = await fetch(apiUrl("/api/settings/run_mode"), {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode }),
   }).then(r => r.json());
@@ -954,7 +985,7 @@ async function saveRunMode() {
     const modes = [...document.querySelectorAll("#set-modes input:checked")].map(x => x.dataset.mode);
     if (!modes.length) { setMsg("❌ 至少需要一个模式", true); renderModeSettings(); return; }
     setMsg("保存模式中…");
-    const res = await fetch("/api/settings/modes", {
+    const res = await fetch(apiUrl("/api/settings/modes"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ modes }),
     }).then(r => r.json());
@@ -985,7 +1016,7 @@ async function saveRunMode() {
       el.addEventListener("click", async () => {
         const sym = el.dataset.sym;
         const next = settingsData.symbols.filter(s => s !== sym);
-        const res = await fetch("/api/settings/symbols", {
+        const res = await fetch(apiUrl("/api/settings/symbols"), {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ symbols: next }),
         }).then(r => r.json());
@@ -1001,7 +1032,7 @@ async function saveRunMode() {
     if (!q) { box.innerHTML = `<span class="hint">输入关键词搜索币种</span>`; return; }
     box.innerHTML = `<span class="hint">搜索中…</span>`;
     try {
-      const r = await fetch("/api/symbols/search?q=" + encodeURIComponent(q) + "&limit=30");
+      const r = await fetch(apiUrl("/api/symbols/search?q=" + encodeURIComponent(q) + "&limit=30"));
       const d = await r.json();
       const results = (d.results || []).filter(x => !settingsData.symbols.includes(x.symbol));
       if (!results.length) {
@@ -1013,7 +1044,7 @@ async function saveRunMode() {
         el.addEventListener("click", async () => {
           const sym = el.dataset.sym;
           const next = [...settingsData.symbols, sym];
-          const res = await fetch("/api/settings/symbols", {
+          const res = await fetch(apiUrl("/api/settings/symbols"), {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ symbols: next }),
           }).then(r => r.json());
@@ -1049,7 +1080,7 @@ async function saveRunMode() {
     const secret = $("set-api-secret").value.trim();
     if (!key && !secret) { setMsg("请填写 API Key 和 Secret", true); return; }
     setMsg("保存中…");
-    const res = await fetch("/api/settings/api", {
+    const res = await fetch(apiUrl("/api/settings/api"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: key, api_secret: secret }),
     }).then(r => r.json());
@@ -1096,7 +1127,7 @@ async function saveRunMode() {
       setMsg("⚠ 没有可保存的值", true); return;
     }
     setMsg("保存风控中…");
-    const res = await fetch("/api/settings/risk", {
+    const res = await fetch(apiUrl("/api/settings/risk"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ risk, leverage }),
     }).then(r => r.json());
@@ -1207,7 +1238,7 @@ async function saveRunMode() {
       return;
     }
     try {
-      const res = await fetch("/api/settings/initial_capital", {
+      const res = await fetch(apiUrl("/api/settings/initial_capital"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: v }),
@@ -1270,7 +1301,7 @@ async function saveRunMode() {
       if (!ok) { renderNetworkSettings(); return; }
     }
     setMsg("切换网络中…");
-    const res = await fetch("/api/settings/network", {
+    const res = await fetch(apiUrl("/api/settings/network"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ network: net }),
     }).then(r => r.json());
@@ -1301,7 +1332,7 @@ async function saveRunMode() {
     const secret = $("set-mainnet-secret").value.trim();
     if (!key && !secret) { setMsg("请填写主网 API Key 和 Secret", true); return; }
     setMsg("保存主网 API 中…");
-    const res = await fetch("/api/settings/api", {
+    const res = await fetch(apiUrl("/api/settings/api"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mainnet_key: key, mainnet_secret: secret }),
     }).then(r => r.json());
@@ -1317,7 +1348,7 @@ async function saveRunMode() {
     const limit = parseFloat($("set-mainnet-custom").value);
     if (!limit || limit <= 0) { setMsg("请填写有效的自定义额度 (USDT)", true); return; }
     setMsg("保存主网自定义额度中…");
-    const res = await fetch("/api/settings/mainnet-quota", {
+    const res = await fetch(apiUrl("/api/settings/mainnet-quota"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ custom_limit: limit }),
     }).then(r => r.json());
@@ -1334,7 +1365,7 @@ async function saveRunMode() {
     if (!a || !a.supported) { setMsg("❌ 当前系统不支持开机自启 (仅 macOS)", true); return; }
     const enabled = !a.enabled;
     setMsg(enabled ? "正在开启开机自启…" : "正在关闭开机自启…");
-    const res = await fetch("/api/settings/autostart", {
+    const res = await fetch(apiUrl("/api/settings/autostart"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
     }).then(r => r.json());
@@ -1342,7 +1373,7 @@ async function saveRunMode() {
     if (res.ok) {
       // 重新拉取状态以刷新按钮/文案 (避免重复绑定监听)
       try {
-        const r = await fetch("/api/settings");
+        const r = await fetch(apiUrl("/api/settings"));
         settingsData = await r.json();
         enabledModes = settingsData.enabled_modes || [];
         modeWeights = settingsData.mode_weights || {};
@@ -1360,4 +1391,229 @@ async function saveRunMode() {
   window.addEventListener("resize", () => {
     if (lastSnapshot) drawChart(lastSnapshot.equity_history, lastSnapshot.day_start_equity);
   });
+}
+
+// ---------------- 入口主页 (多账户落地页) ----------------
+const STRATEGY_MAP = {};
+function initEntry() {
+  document.title = "Binance 测试网 · 多账户量化控制台";
+  loadEntry();
+  setInterval(loadEntry, 5000);
+  const form = $("bind-form");
+  if (form) form.addEventListener("submit", onBindSubmit);
+  const rf = $("entry-refresh");
+  if (rf) rf.addEventListener("click", loadEntry);
+  $("btn-pause") && ($("btn-pause").style.display = "none");
+}
+
+async function loadEntry() {
+  try {
+    const [a, ov] = await Promise.all([
+      fetch("/api/accounts").then(r => r.json()),
+      fetch("/api/accounts/overview").then(r => r.json()),
+    ]);
+    Object.assign(STRATEGY_MAP, a.strategies || {});
+    renderEntryOverview(ov);
+    renderEntryAccounts(ov, a);
+    renderBindStrategies(a.strategies);
+    const mb = $("entry-multi-badge");
+    if (mb) mb.textContent = `${(ov.totals && ov.totals.accounts) || 0} 账户 · ${a.multi ? "多账户" : "单账户"}`;
+  } catch (e) {
+    const list = $("entry-accounts");
+    if (list) list.innerHTML = `<div class="empty">加载失败: ${escapeHtml(String(e))}</div>`;
+  }
+}
+
+function renderEntryOverview(ov) {
+  const t = (ov.totals) || {};
+  const cards = [
+    { label: "总权益", val: fmt(t.equity) + " U" },
+    { label: "今日盈亏", val: `${sign(t.day_pnl || 0)}${fmt(t.day_pnl || 0)} U`, cls: cls(t.day_pnl) },
+    { label: "累计已实现盈亏", val: `${sign(t.realized_pnl || 0)}${fmt(t.realized_pnl || 0)} U`, cls: cls(t.realized_pnl) },
+    { label: "持仓数", val: (t.open_positions || 0) + " 个" },
+    { label: "账户数", val: (t.accounts || 0) + " 个" },
+  ];
+  const box = $("ov-cards");
+  if (box) box.innerHTML = cards.map(c =>
+    `<div class="card"><div class="label">${c.label}</div><div class="value mono ${c.cls || ""}">${c.val}</div></div>`
+  ).join("");
+
+  // 按账户累计已实现盈亏 (横向条)
+  const acc = (ov.accounts) || [];
+  const ba = $("ov-by-account");
+  if (ba) {
+    if (!acc.length) ba.innerHTML = `<div class="empty">暂无账户</div>`;
+    else ba.innerHTML = renderBars(acc.map(x => ({
+      label: x.name,
+      sub: x.strategy_label,
+      val: x.realized_pnl,
+      status: accStatus(x),
+    })));
+  }
+  // 按策略累计已实现盈亏
+  const bs = (ov.by_strategy) || {};
+  const bsel = $("ov-by-strategy");
+  if (bsel) {
+    const rows = Object.keys(bs).map(k => ({
+      label: bs[k].strategy_label || k,
+      sub: (bs[k].accounts || []).join(", "),
+      val: bs[k].sum_realized,
+    }));
+    bsel.innerHTML = rows.length ? renderBars(rows) : `<div class="empty">暂无策略数据</div>`;
+  }
+}
+
+function renderBars(rows) {
+  const vals = rows.map(r => r.val || 0);
+  const max = Math.max(1e-9, ...vals.map(v => Math.abs(v)));
+  return rows.map(r => {
+    const v = r.val || 0;
+    const pct = Math.min(100, Math.abs(v) / max * 100);
+    const pos = v >= 0;
+    // 国内惯例: 涨(正)红 / 跌(负)绿
+    const color = pos ? "var(--red)" : "var(--green)";
+    const side = pos ? "right" : "left";
+    return `<div class="bar-row" title="${escapeHtml(r.label)}: ${fmt(v)} U">
+      <span class="bar-label">${escapeHtml(r.label)}<span class="bar-sub">${escapeHtml(r.sub || "")}</span></span>
+      <span class="bar-track"><span class="bar-fill" style="width:${pct}%;${side === "right" ? "margin-left:auto;" : ""}background:${color}"></span></span>
+      <span class="bar-val mono ${pos ? "neg" : "pos"}">${sign(v)}${fmt(v)}</span>
+    </div>`;
+  }).join("");
+}
+
+function accStatus(x) {
+  if (x.halted) return ["已熔断", "badge-halt"];
+  if (x.paused) return ["已暂停", "badge-pause"];
+  if (x.running) return ["运行中", "badge-ok"];
+  return ["离线", "badge"];
+}
+
+function renderEntryAccounts(ov, a) {
+  const acc = (ov.accounts) || [];
+  const list = $("entry-accounts");
+  if (!list) return;
+  if (!acc.length) { list.innerHTML = `<div class="empty">尚未绑定任何账户</div>`; return; }
+  const defaultName = a.default || "default";
+  list.innerHTML = acc.map(x => {
+    const [stTxt, stCls] = accStatus(x);
+    const isDefault = x.name === defaultName;
+    return `<div class="acc-card" data-name="${escapeHtml(x.name)}">
+      <div class="acc-head">
+        <span class="acc-name">📁 ${escapeHtml(x.name)}</span>
+        <span class="strategy-badge">${escapeHtml(x.strategy_label || x.strategy)}</span>
+        <span class="net-pill ${x.network === "mainnet" ? "net-main" : "net-test"}">${x.network === "mainnet" ? "主网" : "测试网"}</span>
+        <span class="badge ${stCls}">${stTxt}</span>
+      </div>
+      <div class="acc-metrics">
+        <div><span class="m-label">权益</span><span class="mono">${fmt(x.equity)} U</span></div>
+        <div><span class="m-label">今日</span><span class="mono ${cls(x.day_pnl)}">${sign(x.day_pnl)}${fmt(x.day_pnl)}</span></div>
+        <div><span class="m-label">累计已实现</span><span class="mono ${cls(x.realized_pnl)}">${sign(x.realized_pnl)}${fmt(x.realized_pnl)}</span></div>
+        <div><span class="m-label">胜率</span><span class="mono">${fmt(x.win_rate, 1)}%</span></div>
+        <div><span class="m-label">交易数</span><span class="mono">${x.total_trades}</span></div>
+        <div><span class="m-label">持仓</span><span class="mono">${x.open_positions}</span></div>
+      </div>
+      <div class="acc-actions">
+        <button class="btn btn-ok btn-sm acc-open" data-name="${escapeHtml(x.name)}">打开面板</button>
+        <button class="btn btn-ghost btn-sm acc-toggle" data-name="${escapeHtml(x.name)}" data-enabled="${x.enabled ? "0" : "1"}">${x.enabled ? "停用" : "启用"}</button>
+        <button class="btn btn-warn btn-sm acc-reset" data-name="${escapeHtml(x.name)}">重置账户</button>
+        <button class="btn btn-ghost btn-sm acc-unbind" data-name="${escapeHtml(x.name)}" ${isDefault ? "disabled title='默认账户不可解绑'" : ""}>解绑</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  list.querySelectorAll(".acc-open").forEach(b => b.addEventListener("click", () => {
+    window.open("/?account=" + encodeURIComponent(b.dataset.name), "_blank");
+  }));
+  list.querySelectorAll(".acc-toggle").forEach(b => b.addEventListener("click", () => onToggle(b.dataset.name, b.dataset.enabled === "1")));
+  list.querySelectorAll(".acc-reset").forEach(b => b.addEventListener("click", () => onReset(b.dataset.name)));
+  list.querySelectorAll(".acc-unbind").forEach(b => b.addEventListener("click", () => onUnbind(b.dataset.name)));
+}
+
+function renderBindStrategies(strategies) {
+  const sel = $("bf-run-mode");
+  if (!sel) return;
+  sel.innerHTML = Object.keys(strategies || {}).map(k =>
+    `<option value="${k}">${escapeHtml(strategies[k])}</option>`
+  ).join("");
+}
+
+function bindMsg(text, isErr) {
+  const el = $("bind-msg");
+  if (!el) return;
+  el.textContent = text || "";
+  el.style.color = isErr ? "var(--red)" : "var(--green)";
+}
+
+async function onBindSubmit(e) {
+  e.preventDefault();
+  const name = ($("bf-name").value || "").trim();
+  const network = $("bf-network").value;
+  const mode = $("bf-mode").value;
+  const run_mode = $("bf-run-mode").value;
+  const key = ($("bf-key").value || "").trim();
+  const secret = ($("bf-secret").value || "").trim();
+  const symbolsRaw = ($("bf-symbols").value || "").trim();
+  const symbols = symbolsRaw ? symbolsRaw.split(",").map(s => s.trim().toUpperCase()).filter(Boolean) : null;
+  if (!name) { bindMsg("❌ 请填写账户名", true); return; }
+  if (name.toLowerCase() === "default") { bindMsg("❌ 账户名不可为 default (默认账户已保留)", true); return; }
+  if (mode === "live" && (!key || !secret)) { bindMsg("❌ LIVE 模式必须填写 API Key / Secret", true); return; }
+  bindMsg("绑定中…");
+  try {
+    const res = await fetch("/api/accounts/bind", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, network, mode, run_mode, api_key: key, api_secret: secret, symbols }),
+    }).then(r => r.json());
+    if (!res.ok) { bindMsg(res.msg || "绑定失败", true); return; }
+    bindMsg(res.msg || "✅ 已绑定", false);
+    $("bf-name").value = ""; $("bf-key").value = ""; $("bf-secret").value = ""; $("bf-symbols").value = "";
+    await loadEntry();
+    // 绑定后自动打开该账户面板, 用户所见即所得
+    window.open("/?account=" + encodeURIComponent(name), "_blank");
+  } catch (err) {
+    bindMsg("❌ 请求失败: " + err, true);
+  }
+}
+
+async function onToggle(name, enabled) {
+  try {
+    const res = await fetch("/api/accounts/toggle", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, enabled: enabled === "1" || enabled === true }),
+    }).then(r => r.json());
+    if (!res.ok) alert(res.msg || "操作失败");
+    loadEntry();
+  } catch (e) { alert("操作失败: " + e); }
+}
+
+async function onReset(name) {
+  if (!confirm(`重置账户「${name}」?\n\n将清空该账户的全部持仓 / 成交 / 统计数据, 并从交易所重新同步。\n此操作不可恢复, 请确认。`)) return;
+  try {
+    const res = await fetch("/api/accounts/reset", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then(r => r.json());
+    alert(res.msg || (res.ok ? "✅ 已重置" : "重置失败"));
+    loadEntry();
+  } catch (e) { alert("重置失败: " + e); }
+}
+
+async function onUnbind(name) {
+  if (!confirm(`解绑账户「${name}」?\n\n将停止其引擎并从绑定列表移除 (state 文件保留备查)。`)) return;
+  try {
+    const res = await fetch("/api/accounts/unbind", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then(r => r.json());
+    alert(res.msg || (res.ok ? "✅ 已解绑" : "解绑失败"));
+    loadEntry();
+  } catch (e) { alert("解绑失败: " + e); }
+}
+
+// ---------------- 入口路由 ----------------
+document.addEventListener("DOMContentLoaded", () => {
+  if (ACCOUNT) {
+    initPanel(ACCOUNT);
+  } else {
+    initEntry();
+  }
 });

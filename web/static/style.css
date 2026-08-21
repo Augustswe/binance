@@ -444,3 +444,62 @@ body.modal-open { overflow: hidden; }
 .log-term-status-on { color: var(--green); }
 .log-term-as { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
 .log-term-as input { accent-color: var(--green); }
+
+/* ============ 多账户入口主页 (视图切换) ============ */
+html[data-view="panel"] #entry-view { display: none !important; }
+html[data-view="entry"] .topbar,
+html[data-view="entry"] #net-banner,
+html[data-view="entry"] #settings-modal,
+html[data-view="entry"] main,
+html[data-view="entry"] #log-term,
+html[data-view="entry"] #log-term-btn { display: none !important; }
+
+.entry-view { max-width: 1100px; margin: 0 auto; padding: 0 22px 60px; }
+.entry-top {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 0; border-bottom: 1px solid var(--border); margin-bottom: 18px;
+}
+.entry-top .brand { display: flex; align-items: center; gap: 10px; }
+.entry-top .logo { color: var(--yellow); font-size: 22px; }
+.entry-top h1 { font-size: 17px; font-weight: 600; }
+.entry-top-right { display: flex; align-items: center; gap: 10px; }
+
+.ov-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.ov-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 760px) { .ov-charts { grid-template-columns: 1fr; } }
+.ov-chart-title { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+
+.bars { display: flex; flex-direction: column; gap: 12px; }
+.bar-row { display: grid; grid-template-columns: 130px 1fr 104px; align-items: center; gap: 10px; }
+.bar-label { font-size: 13px; font-weight: 600; display: flex; flex-direction: column; }
+.bar-sub { font-size: 11px; color: var(--muted); font-weight: 400; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { position: relative; height: 14px; background: var(--panel2); border-radius: 7px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; border-radius: 7px; min-width: 2px; }
+.bar-val { text-align: right; font-size: 13px; }
+
+.entry-accounts-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.acc-card { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.acc-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.acc-name { font-weight: 700; font-size: 14px; }
+.strategy-badge { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.net-pill { padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.net-test { background: rgba(74,158,255,.12); color: var(--blue); border: 1px solid var(--blue); }
+.net-main { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+.acc-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 10px; margin-bottom: 12px; }
+.acc-metrics > div { display: flex; flex-direction: column; gap: 2px; }
+.m-label { font-size: 11px; color: var(--muted); }
+.acc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* 绑定表单 */
+.bind-form { display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
+.bf-row { display: flex; align-items: center; gap: 12px; }
+.bf-label { width: 110px; color: var(--muted); font-size: 13px; flex-shrink: 0; }
+.bf-label .req { color: var(--red); margin-left: 2px; }
+.bf-row .input { flex: 1; min-width: 0; }
+.bf-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+
+.run-mode-locked {
+  margin: 8px 0; padding: 10px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.5;
+  background: rgba(240,185,11,.08); border: 1px solid var(--yellow); color: var(--yellow);
+}
+.run-mode-locked b { color: var(--text); }

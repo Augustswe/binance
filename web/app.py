@@ -1,9 +1,14 @@
-"""FastAPI 应用: 仪表盘页面 + 状态API + 控制API"""
+"""FastAPI 应用: 仪表盘页面 + 状态API + 控制API (多账户账户感知)
+
+所有「读/写当前账户」的端点按 ?account=<name> 解析到对应子引擎;
+无 account 参数 → 默认(列表第一个)账户。新增账户聚合与绑定/解绑/启停/重置端点。
+"""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -11,7 +16,9 @@ from pydantic import BaseModel
 from core.autostart import (disable as autostart_disable,
                             enable as autostart_enable,
                             status as autostart_status)
+from engine.accounts import AccountManager, AccountSpec, STRATEGY_LABELS
 from engine.trader import _resolve_manual
+from engine.accounts import VALID_MODES
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -66,8 +73,27 @@ class ManualTPSLBody(BaseModel):
     sl: dict | None = None
 
 
-def create_app(engine) -> FastAPI:
+class BindBody(BaseModel):
+    name: str
+    network: str = "testnet"
+    mode: str = "live"
+    api_key: str = ""
+    api_secret: str = ""
+    run_mode: str = "auto"
+    symbols: list[str] | None = None
+    modes_enabled: list[str] | None = None
+
+
+class NameBody(BaseModel):
+    name: str
+    enabled: bool = True
+
+
+def create_app(manager: AccountManager) -> FastAPI:
     app = FastAPI(title="Binance 测试网量化仪表盘", docs_url=None, redoc_url=None)
+
+    def _engine(request: Request):
+        return manager.get_engine(request.query_params.get("account"))
 
     @app.middleware("http")
     async def no_cache_static(request, call_next):
@@ -82,22 +108,25 @@ def create_app(engine) -> FastAPI:
         return FileResponse(STATIC_DIR / "index.html")
 
     @app.get("/api/state")
-    async def api_state():
-        snap = engine.get_snapshot()
-        snap["api"] = engine.api_status()   # 登录状态徽章用
-        snap["network"] = engine.cfg["network"]   # 主网红色横幅用
-        snap["mainnet"] = engine.mainnet_cap_info()   # 主网分级解锁/限额信息 (横幅与档位展示)
+    async def api_state(request: Request):
+        e = _engine(request)
+        snap = e.get_snapshot()
+        snap["api"] = e.api_status()        # 登录状态徽章用
+        snap["network"] = e.cfg["network"]  # 主网红色横幅用
+        snap["mainnet"] = e.mainnet_cap_info()  # 主网分级解锁/限额信息
+        snap["account"] = e.name
+        snap["strategy_label"] = STRATEGY_LABELS.get(e.run_mode, e.run_mode)
         return snap
 
     @app.post("/api/logs/clear")
-    async def api_logs_clear():
+    async def api_logs_clear(request: Request):
         """清空仪表盘操作日志 (前端终端「清屏」按钮调用). 仅清内存中的事件, 不影响持仓/权益."""
-        n = engine.state.clear_events()
+        n = _engine(request).state.clear_events()
         return {"ok": True, "cleared": n, "msg": f"✅ 已清空 {n} 条日志"}
 
     @app.get("/api/config")
-    async def api_config():
-        cfg = engine.cfg
+    async def api_config(request: Request):
+        cfg = _engine(request).cfg
         return {
             "mode": cfg["mode"],
             "network": cfg["network"],
@@ -118,7 +147,6 @@ def create_app(engine) -> FastAPI:
         from core.learner import load_learner_state
         state = load_learner_state()
         rounds = state.get("rounds", [])
-        # 只返回最近15轮的排名摘要
         return {
             "current": state.get("current"),
             "best_score": state.get("best_score"),
@@ -138,9 +166,9 @@ def create_app(engine) -> FastAPI:
         }
 
     @app.get("/api/ml_filter")
-    async def api_ml_filter():
+    async def api_ml_filter(request: Request):
         """ML 门禁/选择器状态: 是否启用、模型是否已加载、各币当前 regime、walk-forward 指标"""
-        e = engine
+        e = _engine(request)
         return {
             "enabled": e.ml_enabled,
             "gate": e.ml_gate,
@@ -153,38 +181,40 @@ def create_app(engine) -> FastAPI:
         }
 
     @app.post("/api/ml_filter/train")
-    async def api_ml_filter_train():
+    async def api_ml_filter_train(request: Request):
         """离线训练 ML 门禁/选择器模型 (拉主网历史K线, walk-forward 评估, 保存)"""
         import asyncio
         from core.ml_filter import MLFilter
+        e = _engine(request)
         try:
             model = await asyncio.to_thread(
-                MLFilter.train, engine.cfg,
-                int(engine.cfg.get("ml_filter", {}).get("days", 365)),
+                MLFilter.train, e.cfg,
+                int(e.cfg.get("ml_filter", {}).get("days", 365)),
             )
-            model.save(engine.ml_model_file)
-            engine.ml = model
-            engine.ml_enabled = True
-            engine.ml_gate = bool(engine.cfg.get("ml_filter", {}).get("gate", True))
-            engine.ml_selector = bool(engine.cfg.get("ml_filter", {}).get("selector", True))
+            model.save(e.ml_model_file)
+            e.ml = model
+            e.ml_enabled = True
+            e.ml_gate = bool(e.cfg.get("ml_filter", {}).get("gate", True))
+            e.ml_selector = bool(e.cfg.get("ml_filter", {}).get("selector", True))
             return {"ok": True, "threshold": model.threshold, "metrics": model.metrics}
         except Exception as ex:
             return {"ok": False, "error": str(ex)[:200]}
 
     @app.post("/api/control")
-    async def api_control(body: ControlBody):
-        return engine.control(body.action)
+    async def api_control(body: ControlBody, request: Request):
+        return _engine(request).control(body.action)
 
     # ---------------- 手动止盈止损 ----------------
     @app.post("/api/manual_tp_sl")
-    async def api_manual_tp_sl(body: ManualTPSLBody):
+    async def api_manual_tp_sl(body: ManualTPSLBody, request: Request):
         """手动设置/清除某持仓的止盈(TP)/止损(SL)。仅作用于当前已开仓。
 
         - tp/sl 为 {type,value} 时覆盖自动 ATR; 为 null 时清除该侧, 回退到自动。
         - 立即解析为绝对价格写入 pos, 并(在 live 模式)把 止盈+止损 市价单一并挂到
           交易所 (TAKE_PROFIT_MARKET / STOP_MARKET, 触发即市价成交, 即使 bot 掉线也生效)。
         """
-        d = engine.state.data
+        e = _engine(request)
+        d = e.state.data
         pos = d["positions"].get(body.symbol)
         if not pos:
             return {"ok": False, "error": f"当前无 {body.symbol} 持仓"}
@@ -194,7 +224,6 @@ def create_app(engine) -> FastAPI:
                     return {"ok": False, "error": f"{name} 格式错误: 需 {{type:price|pct, value:数字}}"}
         sign = 1.0 if pos["side"] == "LONG" else -1.0
         entry = pos.get("entry") or 0.0
-        # 止盈 TP
         if body.tp is None:
             pos.pop("manual_tp", None)
             pos.pop("manual_tp_active", None)
@@ -202,7 +231,6 @@ def create_app(engine) -> FastAPI:
         else:
             pos["manual_tp"] = body.tp
             pos["tp"] = _resolve_manual(entry, sign, body.tp, True)
-        # 止损 SL
         if body.sl is None:
             pos.pop("manual_sl", None)
             pos.pop("manual_sl_active", None)
@@ -210,14 +238,13 @@ def create_app(engine) -> FastAPI:
         else:
             pos["manual_sl"] = body.sl
             pos["sl"] = _resolve_manual(entry, sign, body.sl, False)
-        # 立即把 止盈+止损 市价单同步到交易所 (live 模式): 撤旧挂新, 触发即市价成交
-        if engine.cfg["mode"] == "live":
+        if e.cfg["mode"] == "live":
             try:
-                await engine._sync_exchange_orders(body.symbol, pos, force=True)
-            except Exception as e:
-                engine.log.warning("手动止盈止损下单失败: %s", e)
-        engine.state.save()
-        engine.state.add_event(
+                await e._sync_exchange_orders(body.symbol, pos, force=True)
+            except Exception as ex:
+                e.log.warning("手动止盈止损下单失败: %s", ex)
+        e.state.save()
+        e.state.add_event(
             "info",
             f"🛡 {body.symbol} 手动止盈止损已更新: TP={pos.get('tp')} SL={pos.get('sl')}",
         )
@@ -227,12 +254,13 @@ def create_app(engine) -> FastAPI:
 
     # ---------------- 设置面板 ----------------
     @app.get("/api/settings")
-    async def api_settings():
-        """返回设置面板需要的数据: 当前币种 + 模式 + API 登录状态 + 可用币种候选"""
-        cfg = engine.cfg
+    async def api_settings(request: Request):
+        """返回设置面板需要的数据: 当前币种 + 模式 + API 登录状态 + 可用币种候选 + 账户信息"""
+        e = _engine(request)
+        cfg = e.cfg
         try:
-            candidates = engine.exchange.search_symbols("", limit=200)
-        except Exception as e:
+            candidates = e.exchange.search_symbols("", limit=200)
+        except Exception:
             candidates = []
         from strategies.modes import ALL_MODES
 
@@ -240,107 +268,112 @@ def create_app(engine) -> FastAPI:
             "mode": cfg["mode"],
             "symbols": list(cfg["symbols"]),
             "all_modes": ALL_MODES,
-            "enabled_modes": list(engine.enabled_modes),
-            "mode_weights": dict(engine.modes.weights),
-            "api": engine.api_status(),
+            "enabled_modes": list(e.enabled_modes),
+            "mode_weights": dict(e.modes.weights),
+            "api": e.api_status(),
             "candidates": [c["symbol"] for c in candidates],
-            "has_positions": list(engine.state.data["positions"].keys()),
-            "risk": dict(engine.cfg["risk"]),
-            "leverage": dict(engine.cfg["leverage"]),
-            "network": engine.cfg.get("network", "testnet"),
+            "has_positions": list(e.state.data["positions"].keys()),
+            "risk": dict(e.cfg["risk"]),
+            "leverage": dict(e.cfg["leverage"]),
+            "network": e.cfg.get("network", "testnet"),
             "mainnet_configured": bool(
-                (engine.cfg.get("api_mainnet") or {}).get("key")
-                and (engine.cfg.get("api_mainnet") or {}).get("secret")
+                (e.cfg.get("api_mainnet") or {}).get("key")
+                and (e.cfg.get("api_mainnet") or {}).get("secret")
             ),
-            "mainnet": engine.mainnet_cap_info(),   # 解锁倒计时/档位/限额/警告
-            "autostart": autostart_status(),        # 开机自启状态 (macOS launchd)
-            "initial_capital": float(engine.state.data.get("initial_capital", 0.0)),
-            "equity": engine.state.equity(),
-            "run_mode": engine.run_mode,
+            "mainnet": e.mainnet_cap_info(),
+            "autostart": autostart_status(),
+            "initial_capital": float(e.state.data.get("initial_capital", 0.0)),
+            "equity": e.state.equity(),
+            "run_mode": e.run_mode,
+            # 多账户信息: 账户名 / 策略中文 / 是否锁定(非 default 不可热改策略)
+            "account": e.name,
+            "strategy_label": STRATEGY_LABELS.get(e.run_mode, e.run_mode),
+            "strategy_locked": e.name != "default",
         }
 
     @app.post("/api/settings/initial_capital")
-    async def api_settings_initial_capital(body: InitialCapitalBody):
+    async def api_settings_initial_capital(body: InitialCapitalBody, request: Request):
         """设置起始资金 (盈亏模块): 持久化到 state.json, 即时生效"""
+        e = _engine(request)
         try:
-            engine.state.set_initial_capital(body.value)
-        except ValueError as e:
-            return {"ok": False, "msg": str(e)}
+            e.state.set_initial_capital(body.value)
+        except ValueError as ex:
+            return {"ok": False, "msg": str(ex)}
         return {
             "ok": True,
-            "initial_capital": engine.state.data.get("initial_capital", 0.0),
-            "equity": engine.state.equity(),
+            "initial_capital": e.state.data.get("initial_capital", 0.0),
+            "equity": e.state.equity(),
             "msg": f"✅ 起始资金已设为 {body.value:.2f} U",
         }
 
     @app.post("/api/settings/run_mode")
-    async def api_settings_run_mode(body: RunModeBody):
-        """设置运行模式: auto = 全部并行; 或指定某一策略(donchian/multi/grid/ma_cross/rsi/bollinger) 独占开仓权。
-        信号面板始终展示所有启用模式的判断, 仅开仓权受此值约束。写 config.yaml 并热更新引擎。"""
-        try:
-            from core.config import update_config_run_mode
-            update_config_run_mode(body.mode)
-        except ValueError as e:
-            return {"ok": False, "msg": str(e)}
-        engine.run_mode = body.mode
-        engine.state.add_event("info", f"⚙️ 运行模式已切换: {body.mode}")
-        return {"ok": True, "run_mode": engine.run_mode, "msg": f"✅ 运行模式已设为 {body.mode}"}
+    async def api_settings_run_mode(body: RunModeBody, request: Request):
+        """设置运行模式: auto = 全部并行; 或指定某一策略独占开仓权。
+        信号面板始终展示所有启用模式的判断, 仅开仓权受此值约束。写 config + 热更新引擎。
+        (多账户场景下前端对 strategy_locked 账户隐藏此切换器)"""
+        e = _engine(request)
+        if e.name != "default" and body.mode != e.run_mode:
+            return {"ok": False, "msg": "❌ 该账户策略已绑定, 不可在面板热改(请到入口页重置账户后重绑)"}
+        if body.mode not in VALID_MODES:
+            return {"ok": False, "msg": f"❌ run_mode 非法: {body.mode}"}
+        e.run_mode = body.mode
+        e.state.add_event("info", f"⚙️ 运行模式已切换: {body.mode}")
+        return {"ok": True, "run_mode": e.run_mode, "msg": f"✅ 运行模式已设为 {body.mode}"}
 
     @app.post("/api/settings/modes")
-    async def api_settings_modes(body: ModesBody):
-        """切换启用的策略模式 (写 config.yaml + 热更新引擎)"""
+    async def api_settings_modes(body: ModesBody, request: Request):
+        """切换启用的策略模式 (写 config + 热更新引擎)"""
         from core.config import update_config_modes
         from strategies.modes import ALL_MODES
 
+        e = _engine(request)
         modes = [m for m in body.modes if m in ALL_MODES]
         if not modes:
             return {"ok": False, "msg": "❌ 至少需要启用一个模式"}
         try:
             update_config_modes(modes)
-        except Exception as e:
-            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {e}"}
-        # 热更新: 重建模式管理器
+        except Exception as ex:
+            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {ex}"}
         from strategies.modes import ModeManager
-        engine.modes = ModeManager(engine.cfg, enabled_modes=modes)
-        engine.enabled_modes = engine.modes.enabled  # 以 ModeManager 为准
-        engine.donchian = engine.modes.donchian
+        e.modes = ModeManager(e.cfg, enabled_modes=modes)
+        e.enabled_modes = e.modes.enabled
+        e.donchian = e.modes.donchian
         from core.learner import load_mode_weights
         learned_w = load_mode_weights()
         if learned_w:
-            engine.modes.update_weights(learned_w)
-        engine.state.add_event("info", f"⚙️ 策略模式已切换: {', '.join(modes)}")
+            e.modes.update_weights(learned_w)
+        e.state.add_event("info", f"⚙️ 策略模式已切换: {', '.join(modes)}")
         return {"ok": True, "msg": f"✅ 已启用模式: {', '.join(modes)}", "modes": modes}
 
     @app.get("/api/symbols/search")
-    async def api_symbols_search(q: str = "", limit: int = 50):
+    async def api_symbols_search(q: str = "", limit: int = 50, request: Request = None):
         """按名称模糊搜索可交易币种 (如 q=btc → BTCUSDT)"""
         try:
-            res = engine.exchange.search_symbols(q, limit=int(limit))
-        except Exception as e:
-            return {"error": str(e), "results": []}
+            res = _engine(request).exchange.search_symbols(q, limit=int(limit))
+        except Exception as ex:
+            return {"error": str(ex), "results": []}
         return {"results": res}
 
     @app.post("/api/settings/api")
-    async def api_settings_api(body: ApiBody):
-        return engine.update_api(body.api_key, body.api_secret,
-                                  body.mainnet_key, body.mainnet_secret)
+    async def api_settings_api(body: ApiBody, request: Request):
+        e = _engine(request)
+        spec = manager.get_spec(e.name)
+        key_env = secret_env = None
+        if e.name != "default" and spec:
+            key_env, secret_env = spec.api_key_env, spec.api_secret_env
+        return e.update_api(body.api_key, body.api_secret,
+                            body.mainnet_key, body.mainnet_secret,
+                            key_env=key_env, secret_env=secret_env)
 
     @app.post("/api/settings/network")
-    async def api_settings_network(body: NetworkBody):
-        """切换交易网络 (testnet/mainnet): 热生效, 无需重启
-
-        主网 = 真实资金, engine.set_network 内含服务端校验 (未解锁禁止切换 / 主网必须有 Key) 与
-        live 模式下的持仓清空, 防止误触。
-        """
-        return engine.set_network(body.network)
+    async def api_settings_network(body: NetworkBody, request: Request):
+        """切换交易网络 (testnet/mainnet): 热生效, 无需重启"""
+        return _engine(request).set_network(body.network)
 
     @app.post("/api/settings/mainnet-quota")
-    async def api_settings_mainnet_quota(body: MainnetQuotaBody):
-        """设置主网自定义限额 (仅跑满90天/t3 档位允许); 否则拒绝。
-
-        写入 config.yaml 并热生效, 重启后保留。
-        """
-        return engine.set_mainnet_custom_limit(body.custom_limit)
+    async def api_settings_mainnet_quota(body: MainnetQuotaBody, request: Request):
+        """设置主网自定义限额 (仅跑满90天/t3 档位允许); 否则拒绝。"""
+        return _engine(request).set_mainnet_custom_limit(body.custom_limit)
 
     @app.post("/api/settings/autostart")
     async def api_settings_autostart(body: AutostartBody):
@@ -349,18 +382,13 @@ def create_app(engine) -> FastAPI:
         return autostart_enable() if body.enabled else autostart_disable()
 
     @app.post("/api/settings/symbols")
-    async def api_settings_symbols(body: SymbolsBody):
-        return engine.update_symbols(body.symbols)
+    async def api_settings_symbols(body: SymbolsBody, request: Request):
+        return _engine(request).update_symbols(body.symbols)
 
     @app.post("/api/settings/risk")
-    async def api_settings_risk(body: RiskBody):
-        """保存风控与敞口参数 (写 config.yaml + 热更新引擎, 无需重启)
-
-        风控读取路径: _try_open_mode 读 engine.cfg["risk"], check_open 读
-        RiskManager.risk (与 cfg["risk"] 同一字典引用)。原地修改该字典即可让运行中
-        的开仓预算与风控校验立即生效。
-        """
-        # 类型矫正: 数值字段按配置语义转换
+    async def api_settings_risk(body: RiskBody, request: Request):
+        """保存风控与敞口参数 (写 config + 热更新引擎, 无需重启)"""
+        e = _engine(request)
         def to_int(v):
             try:
                 return int(round(float(v)))
@@ -405,22 +433,98 @@ def create_app(engine) -> FastAPI:
         try:
             from core.config import update_config_risk
             update_config_risk(risk_out, lev_out)
-        except Exception as e:
-            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {e}"}
+        except Exception as ex:
+            return {"ok": False, "msg": f"❌ 写入 config.yaml 失败: {ex}"}
 
-        # 热更新: 原地修改 cfg 字典 (RiskManager 持有同一引用)
         for k, v in risk_out.items():
-            engine.cfg["risk"][k] = v
+            e.cfg["risk"][k] = v
         for k, v in lev_out.items():
-            engine.cfg["leverage"][k] = v
+            e.cfg["leverage"][k] = v
 
-        engine.state.add_event("info", "🛡 风控/敞口参数已更新并热生效")
+        e.state.add_event("info", "🛡 风控/敞口参数已更新并热生效")
         return {
             "ok": True,
             "msg": "✅ 风控与敞口参数已保存并热更新",
-            "risk": dict(engine.cfg["risk"]),
-            "leverage": dict(engine.cfg["leverage"]),
+            "risk": dict(e.cfg["risk"]),
+            "leverage": dict(e.cfg["leverage"]),
         }
+
+    # ---------------- 多账户: 列表 / 总览 / 绑定 / 解绑 / 启停 / 重置 ----------------
+    @app.get("/api/accounts")
+    async def api_accounts():
+        """账户列表 + 策略中文名 + 是否多账户 + 默认账户名"""
+        default_name = manager.get_spec(None).name
+        multi = any(a.spec.name != "default" for a in manager.accounts)
+        return {
+            "accounts": manager.list_accounts(),
+            "strategies": STRATEGY_LABELS,
+            "default": default_name,
+            "multi": multi,
+        }
+
+    @app.get("/api/accounts/overview")
+    async def api_accounts_overview():
+        """多账户盈亏对比聚合 (入口页总览用)"""
+        return manager.overview()
+
+    @app.post("/api/accounts/bind")
+    async def api_accounts_bind(body: BindBody):
+        """绑定新 API: 写 .env(按账户变量名) + accounts.yaml + 热加载新引擎, 无需重启"""
+        from core.config import update_env_named
+        name = (body.name or "").strip()
+        if not name:
+            return {"ok": False, "msg": "❌ 账户名不能为空"}
+        if body.run_mode not in VALID_MODES:
+            return {"ok": False, "msg": f"❌ 策略(run_mode)非法: {body.run_mode}"}
+        if body.network not in ("testnet", "mainnet"):
+            return {"ok": False, "msg": "❌ network 仅支持 testnet / mainnet"}
+        if body.mode not in ("paper", "live"):
+            return {"ok": False, "msg": "❌ mode 仅支持 paper / live"}
+        if body.mode == "live" and (not body.api_key or not body.api_secret):
+            return {"ok": False, "msg": "❌ live 模式必须填写 API Key / Secret"}
+        prefix = "BINANCE_API_KEY_" if body.network == "mainnet" else "BINANCE_TESTNET_API_KEY_"
+        sprefix = "BINANCE_API_SECRET_" if body.network == "mainnet" else "BINANCE_TESTNET_API_SECRET_"
+        key_env = f"{prefix}{name.upper()}"
+        secret_env = f"{sprefix}{name.upper()}"
+        try:
+            update_env_named(key_env, secret_env, body.api_key, body.api_secret)
+        except Exception as ex:
+            return {"ok": False, "msg": f"❌ 写入 .env 失败: {ex}"}
+        os.environ[key_env] = body.api_key.strip()
+        os.environ[secret_env] = body.api_secret.strip()
+        spec = AccountSpec(
+            name=name, enabled=True, network=body.network, mode=body.mode,
+            api_key_env=key_env, api_secret_env=secret_env, run_mode=body.run_mode,
+            symbols=body.symbols or None, modes_enabled=body.modes_enabled or None,
+        )
+        try:
+            await manager.bind(spec)
+        except ValueError as ex:
+            return {"ok": False, "msg": str(ex)}
+        return {"ok": True, "name": name, "strategy": body.run_mode,
+                "msg": f"✅ 已绑定账户 {name} (策略 {STRATEGY_LABELS.get(body.run_mode, body.run_mode)})"}
+
+    @app.post("/api/accounts/unbind")
+    async def api_accounts_unbind(body: NameBody):
+        """解绑账户: 停引擎 + 从内存与 yaml 移除 (state 文件保留备查)"""
+        if body.name == "default":
+            return {"ok": False, "msg": "❌ 默认账户不可解绑"}
+        await manager.unbind(body.name)
+        return {"ok": True, "msg": f"✅ 已解绑账户 {body.name}"}
+
+    @app.post("/api/accounts/toggle")
+    async def api_accounts_toggle(body: NameBody):
+        """启停账户 (enabled=false 停引擎, true 重建并启动)"""
+        await manager.set_enabled(body.name, body.enabled)
+        return {"ok": True, "name": body.name, "enabled": body.enabled,
+                "msg": f"✅ 账户 {body.name} {'已启用' if body.enabled else '已停用'}"}
+
+    @app.post("/api/accounts/reset")
+    async def api_accounts_reset(body: NameBody):
+        """重置账户: 清空该账户 state.json(持仓/成交/统计), 引擎重启从交易所重新同步。
+        友好提示由前端确认框完成, 这里只执行重置。"""
+        await manager.reset_account(body.name)
+        return {"ok": True, "name": body.name, "msg": f"✅ 账户 {body.name} 已重置 (历史已清空)"}
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

@@ -236,6 +236,32 @@ def update_env_api(key: str, secret: str) -> None:
     env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def update_env_named(key_env: str, secret_env: str, key: str, secret: str) -> None:
+    """更新 .env 中**指定变量名**的 API Key/Secret (多账户: 每账户独立变量名)
+
+    单账户默认 Key 用 update_env_api; 多账户每账户用各自变量名(BINANCE_TESTNET_API_KEY_<NAME> 等)。
+    """
+    env_path = BASE_DIR / ".env"
+    text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    lines = text.split("\n")
+    out: list[str] = []
+    k_set = s_set = False
+    for line in lines:
+        if line.startswith(f"{key_env}="):
+            out.append(f"{key_env}={key}")
+            k_set = True
+        elif line.startswith(f"{secret_env}="):
+            out.append(f"{secret_env}={secret}")
+            s_set = True
+        else:
+            out.append(line)
+    if not k_set:
+        out.append(f"{key_env}={key}")
+    if not s_set:
+        out.append(f"{secret_env}={secret}")
+    env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
 def _merge_tuned(cfg: dict) -> None:
     """合并 AI 调参结果 (data/tuned_params.json) 到配置"""
     from .tuner import load_tuned_params

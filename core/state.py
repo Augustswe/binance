@@ -24,11 +24,12 @@ def utc_today_str() -> str:
 
 
 class TradingState:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, state_file: "Path | None" = None):
         self.cfg = cfg
         self.log = get_logger("state")
         self.lock = threading.RLock()
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.state_file = Path(state_file) if state_file else STATE_FILE
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
 
         initial = float(cfg.get("paper_initial_balance", 10000))
         today = utc_today_str()
@@ -66,7 +67,7 @@ class TradingState:
 
     # ---------------- 持久化 ----------------
     def _load(self) -> None:
-        if STATE_FILE.exists():
+        if self.state_file.exists():
             try:
                 with open(STATE_FILE, "r", encoding="utf-8") as f:
                     saved = json.load(f)
@@ -90,10 +91,10 @@ class TradingState:
 
     def save(self) -> None:
         try:
-            tmp = STATE_FILE.with_suffix(".json.tmp")
+            tmp = self.state_file.with_suffix(".json.tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, ensure_ascii=False, default=str)
-            tmp.replace(STATE_FILE)
+            tmp.replace(self.state_file)
         except Exception as e:
             self.log.warning("状态保存失败: %s", e)
 

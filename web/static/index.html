@@ -6,8 +6,101 @@
 <title>Binance 测试网量化仪表盘</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%F0%9F%93%9F%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
+<script>
+  /* 入口页判定: 带 ?account= 的 URL 是「单账户策略面板」; 否则是「多账户入口主页」 */
+  try {
+    document.documentElement.dataset.view = (new URLSearchParams(location.search).has("account")) ? "panel" : "entry";
+  } catch (e) { document.documentElement.dataset.view = "entry"; }
+</script>
 </head>
 <body>
+
+<!-- ============ 多账户入口主页 (落地页: API 列表 + 绑定 + 盈亏总览 三合一) ============ -->
+<div id="entry-view" class="entry-view">
+  <header class="entry-top">
+    <div class="brand">
+      <span class="logo">◈</span>
+      <h1>Binance 测试网 · 多账户量化控制台</h1>
+    </div>
+    <div class="entry-top-right">
+      <span id="entry-multi-badge" class="badge">-- 账户</span>
+      <button class="btn btn-ghost" id="entry-refresh">↻ 刷新</button>
+    </div>
+  </header>
+
+  <!-- 盈亏总览 -->
+  <section class="panel entry-ov">
+    <div class="panel-title">📊 盈亏总览 <span class="hint">全部绑定账户聚合 · 每 5 秒自动刷新</span></div>
+    <div class="ov-cards" id="ov-cards"></div>
+    <div class="ov-charts">
+      <div class="ov-chart">
+        <div class="ov-chart-title">按账户 · 累计已实现盈亏</div>
+        <div id="ov-by-account" class="bars"><div class="empty">加载中…</div></div>
+      </div>
+      <div class="ov-chart">
+        <div class="ov-chart-title">按策略 · 累计已实现盈亏</div>
+        <div id="ov-by-strategy" class="bars"><div class="empty">加载中…</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 已绑定账户列表 -->
+  <section class="panel entry-accounts">
+    <div class="panel-title">🔗 已绑定账户 <span class="hint">点击「打开面板」新开标签页进入该策略面板 (标签名即策略名)</span></div>
+    <div id="entry-accounts" class="entry-accounts-list"><div class="empty">加载中…</div></div>
+  </section>
+
+  <!-- 绑定新 API -->
+  <section class="panel entry-bind">
+    <div class="panel-title">➕ 绑定新 API <span class="hint">策略在此处一次性选定, 绑定后不可在面板热改 (保证数据稳定)</span></div>
+    <form id="bind-form" class="bind-form" autocomplete="off">
+      <div class="bf-row">
+        <label class="bf-label">账户名<span class="req">*</span></label>
+        <input class="input" id="bf-name" placeholder="如 eth_grid / btc_donchian (不可为 default)" required>
+        <span class="hint">绑定后用作标签页标识</span>
+      </div>
+      <div class="bf-row">
+        <label class="bf-label">交易网络</label>
+        <select class="input" id="bf-network">
+          <option value="testnet">🧪 测试网 (虚拟资金)</option>
+          <option value="mainnet">💰 主网 (真实资金)</option>
+        </select>
+      </div>
+      <div class="bf-row">
+        <label class="bf-label">运行模式</label>
+        <select class="input" id="bf-mode">
+          <option value="live">LIVE (实盘/真实测试网登录)</option>
+          <option value="paper">PAPER (模拟, 免 API Key)</option>
+        </select>
+      </div>
+      <div class="bf-row">
+        <label class="bf-label">交易策略<span class="req">*</span></label>
+        <select class="input" id="bf-run-mode"></select>
+        <span class="hint">绑定后固定, 不可热改</span>
+      </div>
+      <div class="bf-row">
+        <label class="bf-label">API Key</label>
+        <input class="input mono" id="bf-key" placeholder="BINANCE_TESTNET_API_KEY">
+      </div>
+      <div class="bf-row">
+        <label class="bf-label">API Secret</label>
+        <input class="input mono" id="bf-secret" type="password" placeholder="BINANCE_TESTNET_API_SECRET">
+      </div>
+      <div class="bf-row">
+        <label class="bf-label">交易对(可选)</label>
+        <input class="input mono" id="bf-symbols" placeholder="btc,eth,sol (留空用全局默认)">
+        <span class="hint">逗号分隔, 留空沿用全局配置</span>
+      </div>
+      <div class="bf-actions">
+        <button type="submit" class="btn btn-ok" id="bf-submit">绑定并启动</button>
+        <span id="bind-msg" class="modal-msg"></span>
+      </div>
+    </form>
+  </section>
+
+  <footer class="foot">多账户控制台 · 单进程隔离 · 每个 API Key 绑定一个策略 · 数据相互独立</footer>
+  <div class="disclaimer">📢 开源仅供学习参考 · 非投资建议 · 主网模式涉及真实资金, 请谨慎</div>
+</div>
 <header class="topbar">
   <div class="brand">
     <span class="logo">◈</span>
@@ -18,6 +111,7 @@
     <span id="login-badge" class="badge" title="测试网 API 登录状态">登录 --</span>
     <span id="mode-badge" class="badge">--</span>
     <span id="status-badge" class="badge badge-ok">连接中…</span>
+    <span id="account-chip" class="badge" style="display:none" title="当前账户 · 策略"></span>
     <button id="btn-pause" class="btn btn-warn">暂停</button>
     <button id="btn-reset" class="btn btn-ghost">重置今日</button>
     <button id="btn-settings" class="btn btn-ghost">⚙️ 设置</button>
@@ -161,6 +255,7 @@
           </select>
           <span class="hint">当前: <b id="set-run-mode-tag">自动并行</b> · 手动指定用哪个策略下单</span>
         </div>
+        <div id="run-mode-locked" class="run-mode-locked" style="display:none"></div>
         <div id="set-modes" class="modal-mode-grid"></div>
         <div class="modal-row" style="margin-top:8px">
           <span class="hint">同币种先到先得 · 新增策略后, 下方"策略信号"模块会自动新增对应 Tab · 钉选某策略后仅该策略有开仓权, 信号仍全展示</span>
