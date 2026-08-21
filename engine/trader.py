@@ -654,7 +654,8 @@ class TradingEngine:
                 await self._sync_exchange_orders(sym, pos)
             # 兜底: 交易所同步/重启恢复的持仓可能没有TP/SL, 用最近ATR补算, 避免裸奔
             # donchian 模式: 只补 SL (ATR止损), 不补 TP (让利润奔跑)
-            sig = d["signals"].get(sym) or {}
+            # 注意: signals 以 "模式:币种" 为键, 不能裸 sym 取, 否则永远取不到 atr
+            sig = next((v for k, v in d["signals"].items() if k.endswith(":" + sym)), {}) or {}
             atr = sig.get("atr") or 0.0
             sign = 1.0 if pos["side"] == "LONG" else -1.0
             need_sl = not pos.get("sl")

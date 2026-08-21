@@ -273,16 +273,15 @@ function tpSlCell(p) {
   const active = p.manual_tp_active || p.manual_sl_active;
   const hasTP = p.tp > 0;
   const hasSL = p.sl > 0;
-  const cur = (hasTP || hasSL)
-    ? `<span class="tpsl-cur">${hasTP ? fmtPrice(p.tp) : "∞"} / ${hasSL ? fmtPrice(p.sl) : "移动止损"}</span>`
-    : "";
-  const activeTag = active ? '<span class="tpsl-active-tag">● 已生效</span>' : "";
+  // 始终显示当前止盈/止损状态 (自动策略值, 或手动覆盖后的值), 不随有无值而隐藏
+  const autoTP = hasTP ? fmtPrice(p.tp) : "∞";
+  const autoSL = hasSL ? `移动止损 ${fmtPrice(p.sl)}` : "--";
+  const cur = `<span class="tpsl-cur">${autoTP} / ${autoSL}${active ? " (手动)" : ""}</span>`;
   return `<div class="tpsl-cell">
     <button class="tpsl-btn ${open ? "open" : ""}" data-sym="${p.symbol}" title="${open ? "收起止盈止损编辑器" : "点击设置市价止盈止损 (触发即市价成交)"}">
       ${open ? "收起 ▲" : "市价止盈止损"}
     </button>
     ${cur}
-    ${activeTag}
   </div>`;
 }
 
