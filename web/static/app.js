@@ -254,27 +254,26 @@ function renderSymbols(s) {
         if (pos && k.startsWith(pos.mode + ":")) break;
       }
     }
-    // 主导策略:
-    //   有持仓且为系统本策略开仓 → 持仓真实策略(pos.mode, 例如 donchian/网格/均线)
-    //   有持仓但从交易所同步恢复(mode="交易所同步") → 交易所不记录原始开仓策略, 退回本账户运行模式
-    //   无持仓 → 运行模式(单一策略即它本身); auto/multi → 该币种各模式信号中评分最高/最优先触发的策略
+    // 主导策略 (永远展示「具体策略名」, 不展示 auto/multi 等元模式):
+    //   系统本策略开仓的持仓 → 持仓真实策略(pos.mode, 例如 donchian/网格/均线)
+    //   交易所同步恢复的持仓(mode="交易所同步") → 交易所不记录原始开仓策略, 故展示:
+    //       单一策略账户 → 该账户唯一绑定的具体策略(即其真实开仓策略)
+    //       auto/multi  → 该币种当前各模式信号中评分最高/最优先触发的「具体策略」(数据驱动, 非原始开仓策略)
+    //   无持仓 → 单一策略账户即它本身; auto/multi → 数据驱动主导策略
     let domLabel = "--";
     let domTitle = "";
-    if (pos && pos.mode) {
-      if (pos.mode === "交易所同步") {
-        // 交易所同步持仓: 原始开仓策略在交易所侧不可知, 按本账户运行模式显示(单一策略账户即其真实策略)
-        const rm = s.run_mode;
-        const rmLabel = (rm && MODE_LABELS[rm]) ? MODE_LABELS[rm] : (rm || "未知");
-        domLabel = rmLabel;
-        domTitle = "本持仓为从交易所同步恢复, 交易所不记录原始开仓策略; 已按本账户运行模式(" + rmLabel + ")显示";
-      } else {
-        domLabel = MODE_LABELS[pos.mode] || pos.mode;
-      }
+    if (pos && pos.mode && pos.mode !== "交易所同步") {
+      domLabel = MODE_LABELS[pos.mode] || pos.mode;           // 系统开仓: 真实策略
     } else {
       const rm = s.run_mode;
-      if (rm && rm !== "auto" && rm !== "multi" && MODE_LABELS[rm]) {
-        domLabel = MODE_LABELS[rm];
+      const single = rm && rm !== "auto" && rm !== "multi";   // 单一策略账户
+      if (single) {
+        domLabel = MODE_LABELS[rm] || rm;
+        if (pos && pos.mode === "交易所同步") {
+          domTitle = "持仓由交易所同步恢复; 本账户仅绑定「" + domLabel + "」单一策略, 即为其开仓策略";
+        }
       } else {
+        // auto/multi: 数据驱动 — 该币种各模式信号中评分最高/最优先触发的「具体策略」
         let best = null, bestMetric = -1;
         for (const k of Object.keys(s.signals)) {
           if (!k.endsWith(":" + sym)) continue;
@@ -285,6 +284,9 @@ function renderSymbols(s) {
           if (metric > bestMetric) { bestMetric = metric; best = sg; }
         }
         if (best && best.mode) domLabel = MODE_LABELS[best.mode] || best.mode;
+        if (pos && pos.mode === "交易所同步") {
+          domTitle = "持仓由交易所同步恢复, 交易所不记录原始开仓策略; 此处显示当前该币种信号最强的具体策略(非原始开仓策略)";
+        }
       }
     }
     const showLev = pos ? pos.leverage : sig.leverage;   // 有持仓显示真实杠杆, 无持仓显示计划杠杆
