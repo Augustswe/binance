@@ -632,7 +632,6 @@ class TradingEngine:
     # ---------------- 止盈止损 ----------------
     async def _check_tp_sl(self):
         d = self.state.data
-        tp_atr = float(self.cfg["position"]["tp_atr"])
         sl_atr = float(self.cfg["position"]["sl_atr"])
         for sym, pos in list(d["positions"].items()):
             p = d["mark_prices"].get(sym)
@@ -652,28 +651,30 @@ class TradingEngine:
                     pos["manual_sl_active"] = True
                 # 手动止盈+止损一并同步到交易所 (市价单, 行情断流也能成交)
                 await self._sync_exchange_orders(sym, pos)
-            # 兜底: 交易所同步/重启恢复的持仓可能没有TP/SL, 用最近ATR补算, 避免裸奔
-            # donchian 模式: 只补 SL (ATR止损), 不补 TP (让利润奔跑)
+            # 补算 + 移动止损: donchian 与 交易所同步 均走「移动止损」策略
+            # - 不挂固定止盈 (让利润奔跑), 只补一个初始 SL, 之后交给 trailing 随新高/新低锁浮盈
+            # - 设了手动止盈/止损则优先走用户硬止损, 不覆盖
             # 注意: signals 以 "模式:币种" 为键, 不能裸 sym 取, 否则永远取不到 atr
             sig = next((v for k, v in d["signals"].items() if k.endswith(":" + sym)), {}) or {}
             atr = sig.get("atr") or 0.0
             sign = 1.0 if pos["side"] == "LONG" else -1.0
-            need_sl = not pos.get("sl")
-            need_tp = pos.get("mode") != "donchian" and not pos.get("tp")
-            if (need_sl or need_tp) and atr and atr > 0:
-                if need_tp:
-                    pos["tp"] = pos["entry"] + sign * tp_atr * atr
-                if need_sl:
-                    d_sl = (self.donchian.sl_atr if self.donchian else sl_atr) if pos.get("mode") == "donchian" else sl_atr
-                    pos["sl"] = pos["entry"] - sign * d_sl * atr
-                self.log.info("[%s] 补算止损 SL=%.2f", sym, pos["sl"])
-                self.state.add_event("info", f"🛡 {sym} 补算止损 SL={pos['sl']:.2f}")
+            trailing = pos.get("mode") in ("donchian", "交易所同步")
+            # 1) 缺 SL 且未设手动止损 → 用最近 ATR 补一个初始止损, 避免裸奔
+            if not pos.get("sl") and not pos.get("manual_sl") and atr and atr > 0:
+                d_sl = (self.donchian.sl_atr if self.donchian else sl_atr) if pos.get("mode") == "donchian" else sl_atr
+                pos["sl"] = round(pos["entry"] - sign * d_sl * atr, 2)
+                self.log.info("[%s] 补算初始止损 SL=%.2f", sym, pos["sl"])
+                self.state.add_event("info", f"🛡 {sym} 补算初始止损 SL={pos['sl']:.2f}")
                 # 补算后立即把止损下到交易所
                 await self._sync_exchange_orders(sym, pos)
+            # 2) 移动止损模式: 不挂固定止盈, 清掉旧的固定止盈值 (让利润奔跑)
+            if trailing and not pos.get("manual_tp") and pos.get("tp"):
+                pos["tp"] = 0
+                self.log.info("[%s] 清除固定止盈, 改用移动止损", sym)
 
-            # ---- 移动止损 (trailing stop): 仅 donchian 模式持仓, 随新高/新低锁浮盈 ----
+            # ---- 移动止损 (trailing stop): donchian 与 交易所同步 持仓, 随新高/新低锁浮盈 ----
             # 注意: 设了手动止损则跳过移动止损, 否则会被 trailing 改掉用户硬止损
-            if pos.get("mode") == "donchian" and not pos.get("manual_sl"):
+            if trailing and not pos.get("manual_sl"):
                 await self._update_trailing_stop(sym, pos, p, atr)
 
             if pos["side"] == "LONG":

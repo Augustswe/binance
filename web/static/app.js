@@ -273,9 +273,16 @@ function tpSlCell(p) {
   const active = p.manual_tp_active || p.manual_sl_active;
   const hasTP = p.tp > 0;
   const hasSL = p.sl > 0;
+  // 移动止损模式: donchian 与 交易所同步 都随新高/新低锁浮盈, 不挂固定止盈
+  const trailing = p.mode === "donchian" || p.mode === "交易所同步";
   // 始终显示当前止盈/止损状态 (自动策略值, 或手动覆盖后的值), 不随有无值而隐藏
   const autoTP = hasTP ? fmtPrice(p.tp) : "∞";
-  const autoSL = hasSL ? `移动止损 ${fmtPrice(p.sl)}` : "--";
+  let autoSL = "--";
+  if (hasSL) {
+    if (p.manual_sl_active) autoSL = `止损(手动) ${fmtPrice(p.sl)}`;
+    else if (trailing) autoSL = `移动止损 ${fmtPrice(p.sl)}`;
+    else autoSL = `止损 ${fmtPrice(p.sl)}`;
+  }
   const cur = `<span class="tpsl-cur">${autoTP} / ${autoSL}${active ? " (手动)" : ""}</span>`;
   return `<div class="tpsl-cell">
     <button class="tpsl-btn ${open ? "open" : ""}" data-sym="${p.symbol}" title="${open ? "收起止盈止损编辑器" : "点击设置市价止盈止损 (触发即市价成交)"}">
