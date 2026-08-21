@@ -890,16 +890,27 @@ class TradingEngine:
         if not mark or mark <= 0:
             return
 
-        # ============ 多模式并行: 每个启用模式独立分析/开仓 ============
+        # ============ 模式分析/开仓 ============
         # 同币种竞争制: 该币种已有任何模式的持仓 → 只做该持仓的出场管理, 不再开新仓
         pos = d["positions"].get(symbol)
-        # 运行模式: auto = 全部启用模式并行; 否则只让指定策略有开仓权 (信号仍全展示)
-        eff_modes = self.enabled_modes if self.run_mode == "auto" else [self.run_mode]
+        # 元模式(meta-mode)说明:
+        #   - "multi" (多策略) 本身不是具体策略, 不产生自身信号; 它 = 从所有具体策略中"挑选一个最优"开仓
+        #   - "auto"  (自动并行) = 每个具体策略独立分析, 谁先触发谁开仓 (同币种竞争, 抢到即止)
+        # 因此 eff_modes 永远只含具体策略(donchian/grid/ma_cross/rsi/bollinger), 绝不直接分析/开仓 "multi"
+        # 这样 主导策略 列永远显示具体策略名, 绝不出现 "多策略"/"自动并行" 这类元模式标签
+        concrete_modes = [m for m in self.enabled_modes if m != "multi"]
+        if self.run_mode == "auto":
+            eff_modes = concrete_modes
+        elif self.run_mode == "multi":
+            eff_modes = concrete_modes
+        else:
+            eff_modes = [self.run_mode]
+        multi_candidates = []  # multi 模式: 累积每个具体策略的候选信号, 循环结束后挑 |score| 最大者开仓
         for mode in eff_modes:
             sig = self.modes.analyze(mode, symbol, klines, price=mark)
             if sig is None:
                 continue
-            # 无论是否持仓都记录信号, 让信号面板能看到所有模式的判断 (修复"只剩 donchian")
+            # 无论是否持仓都记录信号, 让信号面板能看到所有模式的判断
             d["signals"][f"{mode}:{symbol}"] = sig.to_dict()
             # ---- ML 选择器: 震荡市抑制 Donchian 开仓 (出场管理不受影响) ----
             if mode == "donchian" and self.ml_selector and self.ml:
@@ -915,14 +926,19 @@ class TradingEngine:
                     self.state.add_event("ml", f"🚪 门禁拦截 {symbol} {sig.action} prob={prob:.2f}")
                     continue
             if not pos:
-                # 无持仓: 开仓 (信号触发且通过风控/ML门禁)
-                if sig.action == "LONG":
-                    await self._try_open_mode(mode, symbol, "LONG", mark, sig)
-                elif sig.action == "SHORT":
-                    await self._try_open_mode(mode, symbol, "SHORT", mark, sig)
-                # 开仓成功则其他模式不再抢同币种
-                if d["positions"].get(symbol):
-                    break
+                # 无持仓: 累积或开仓
+                if sig.action:
+                    if self.run_mode == "multi":
+                        # 多策略 = 先收集所有具体策略的触发信号, 循环后挑评分最高者 (本笔主导策略)
+                        multi_candidates.append((mode, sig))
+                    else:
+                        # auto / 单一策略: 触发即开仓, 抢到同币种即止
+                        if sig.action == "LONG":
+                            await self._try_open_mode(mode, symbol, "LONG", mark, sig)
+                        elif sig.action == "SHORT":
+                            await self._try_open_mode(mode, symbol, "SHORT", mark, sig)
+                        if d["positions"].get(symbol):
+                            break
             else:
                 # 有持仓: 出场管理只在"持有该仓的模式"上运行; 其余模式仅展示信号, 不 break
                 pos_mode = pos.get("mode", "donchian")
@@ -943,6 +959,13 @@ class TradingEngine:
                                 trade = await self.execution.close_position(symbol, mark, f"信号消失 @{mark:.2f}")
                                 if trade:
                                     await self._notify_close(trade)
+        # multi 模式: 从候选具体策略中挑选 |score| 最大者作为本笔开仓的主导策略
+        if not pos and self.run_mode == "multi" and multi_candidates:
+            best_mode, best_sig = max(multi_candidates, key=lambda ms: abs(ms[1].score))
+            if best_sig.action == "LONG":
+                await self._try_open_mode(best_mode, symbol, "LONG", mark, best_sig)
+            elif best_sig.action == "SHORT":
+                await self._try_open_mode(best_mode, symbol, "SHORT", mark, best_sig)
 
     async def _try_open(self, symbol: str, side: str, price: float, result):
         d = self.state.data
