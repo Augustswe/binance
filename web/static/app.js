@@ -319,7 +319,7 @@ function posPill(p) {
   return `<span class="pill ${p.side === "LONG" ? "pill-long" : "pill-short"}">${p.side === "LONG" ? "多" : "空"} ${p.qty} @${p.leverage}x</span>`;
 }
 
-// TP/SL 列: 显眼可点击的「市价止盈止损」按钮 (展开就地编辑器)
+// TP/SL 列: 显眼可点击的「止盈止损」按钮 (展开就地编辑器)
 // 点击 = 展开/收起该币种的 TP/SL 编辑器 (复用 .tpsl-btn 类, 走 tbody 事件委托)
 function tpSlCell(p) {
   const open = tpslOpenSym === p.symbol;
@@ -339,8 +339,8 @@ function tpSlCell(p) {
   const cur = `<span class="tpsl-cur">${autoTP} / ${autoSL}${active ? " (手动)" : ""}</span>`;
   return `<div class="tpsl-cell">
     <div class="tpsl-actions">
-      <button class="tpsl-btn ${open ? "open" : ""}" data-sym="${p.symbol}" title="${open ? "收起止盈止损编辑器" : "点击设置市价止盈止损 (触发即市价成交)"}">
-        ${open ? "收起 ▲" : "市价止盈止损"}
+      <button class="tpsl-btn ${open ? "open" : ""}" data-sym="${p.symbol}" title="${open ? "收起止盈止损编辑器" : "点击设置止盈止损 (触发即市价成交)"}">
+        ${open ? "收起 ▲" : "止盈止损"}
       </button>
       <button class="tpsl-btn close-now" data-sym="${p.symbol}" title="按当前价立即市价平仓 (不可撤销)">立即平仓</button>
     </div>
@@ -389,7 +389,7 @@ function setActiveSigTab(mode) {
   });
 }
 
-// 持仓行内联止盈止损: 点击「⚡ 市价止盈止损」按钮就地展开编辑, 市价单 (触发即市价成交)
+// 持仓行内联止盈止损: 点击「止盈止损」按钮就地展开编辑, 市价单 (触发即市价成交)
 function tpslDetailRow(p) {
   const sym = p.symbol;
   const mtp = p.manual_tp || null;

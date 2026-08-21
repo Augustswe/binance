@@ -311,9 +311,9 @@ body.modal-open { overflow: hidden; }
 .sig-tab-panel .empty { padding: 28px 12px; }
 .sig-tbl { width: 100%; border-collapse: collapse; }
 
-/* TP/SL 列: 紧凑的「市价止盈止损」「立即平仓」按钮, 自适应内容宽度, 不撑大单元格挤压其它列 */
+/* TP/SL 列: 紧凑的「止盈止损」「立即平仓」按钮, 自适应内容宽度, 不撑大单元格挤压其它列; 与表头「止盈 / 止损」对齐靠右 */
 .tpsl-cell {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
 }
 .tpsl-actions { display: flex; gap: 5px; }
 .tpsl-actions .tpsl-btn { flex: 0 0 auto; }
@@ -333,7 +333,7 @@ body.modal-open { overflow: hidden; }
 .tpsl-btn.close-now:hover { background: #e8a33d; color: #1a1d24; border-color: #e8a33d; }
 .tpsl-cur {
   font-size: 11px; color: var(--muted); font-family: var(--mono);
-  text-align: center;
+  text-align: right;
 }
 .tpsl-active-tag {
   font-size: 11px; color: var(--green);
