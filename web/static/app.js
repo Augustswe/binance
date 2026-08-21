@@ -18,11 +18,13 @@ const sign = (v) => (v > 0 ? "+" : "");
 // ---------------- 多账户: ?account= 解析 ----------------
 // 带 account 参数 → 单账户策略面板; 否则走入口页 (fetch 不带 account)。
 const ACCOUNT = (() => { try { return new URLSearchParams(location.search).get("account"); } catch (e) { return null; } })();
-const QS = ACCOUNT ? "account=" + encodeURIComponent(ACCOUNT) : "";
-// 给所有面板 API 调用追加 ?account=<name>, 让后端路由到对应子引擎
+// 给所有面板 API 调用追加 ?account=<name>, 让后端路由到对应子引擎。
+// gSettingsAccount: 入口页打开「某账户设置抽屉」时临时覆盖 account, 使设置接口路由到该账户。
+let gSettingsAccount = null;
 function apiUrl(path) {
-  if (!QS) return path;
-  return path + (path.includes("?") ? "&" : "?") + QS;
+  const acct = gSettingsAccount || ACCOUNT;
+  if (!acct) return path;
+  return path + (path.includes("?") ? "&" : "?") + "account=" + encodeURIComponent(acct);
 }
 
 function scoreBar(v) {
@@ -573,6 +575,12 @@ function renderTrades(s) {
 let enabledModes = [];
 let runMode = "auto";  // 运行模式: auto = 全部并行, 否则只让指定策略开仓
 let modeWeights = {};
+// 设置弹窗共享状态: 入口页与面板共用同一份设置 DOM, 故提升到模块级
+let settingsData = { symbols: [], has_positions: [], candidates: [] };
+function setMsg(text, isErr = false) {
+  const el = $("set-msg");
+  if (el) { el.textContent = text || ""; el.style.color = isErr ? "var(--red)" : "var(--green)"; }
+}
 
 function renderModes(s) {
   const tb = document.querySelector("#modes-table tbody");
@@ -896,523 +904,6 @@ function initPanel(account) {
     }
   });
 
-  // ---------------- 设置面板 ----------------
-  let settingsData = { symbols: [], has_positions: [], candidates: [] };
-  const setMsg = (text, isErr = false) => {
-    const el = $("set-msg");
-    el.textContent = text || "";
-    el.style.color = isErr ? "var(--red)" : "var(--green)";
-  };
-
-  async function loadSettings() {
-    try {
-      const r = await fetch(apiUrl("/api/settings"));
-      settingsData = await r.json();
-      const api = settingsData.api || {};
-      let statusText;
-      if (api.mode !== "live") {
-        statusText = "🟡 模拟模式 (paper) - 无需登录";
-      } else if (api.verified === true) {
-        statusText = `🔑 已登录 (${api.key_masked})` + (api.wallet != null ? ` · 钱包 ${fmt(api.wallet)} U` : "");
-      } else if (api.verified === false) {
-        statusText = api.configured ? "🔒 已配置但登录失败 (Key 无效)" : "🔒 未登录 - 请填写 API Key/Secret";
-      } else {
-        statusText = "⏳ 验证中…";
-      }
-      $("set-api-status").textContent = statusText;
-      if (api.verified === true) {
-        $("set-api-key").value = "";
-        $("set-api-secret").value = "";
-        $("set-api-key").placeholder = api.key_masked;
-      }
-      // 模式信息 (全局, 供模式对比表)
-      enabledModes = settingsData.enabled_modes || [];
-      modeWeights = settingsData.mode_weights || {};
-      renderModeSettings();
-      renderSymbolList();
-      renderRiskSettings();
-      renderNetworkSettings();
-      renderPnl();
-      renderAutostart();
-    } catch (e) {
-      setMsg("❌ 加载设置失败: " + e, true);
-    }
-  }
-
-// 模式勾选 UI - 紧凑卡片网格
-function renderModeSettings() {
-  const box = $("set-modes");
-  if (!box) return;
-  if (settingsData.run_mode) runMode = settingsData.run_mode;  // 与后端同步
-  const all = settingsData.all_modes || [];
-  box.innerHTML = all.map(m => {
-    const on = (settingsData.enabled_modes || []).includes(m);
-    const w = (settingsData.mode_weights || {})[m];
-    const wTxt = w != null ? fmt(w, 2) + "x" : "1.00x";
-    return `<label class="mode-card ${on ? "on" : ""}" data-mode="${m}">
-      <input type="checkbox" data-mode="${m}" ${on ? "checked" : ""}>
-      <span class="mc-name">${MODE_LABELS[m] || m}</span>
-      <span class="mc-weight">权重 ${wTxt}</span>
-    </label>`;
-  }).join("");
-  // 用 label 上的 click 触发, 避免重复; checkbox 由 label 包装, change 仍有效
-  box.querySelectorAll("input[type=checkbox]").forEach(cb => {
-    cb.addEventListener("change", saveModes);
-  });
-  // 同步运行模式选择器
-  const sel = $("set-run-mode");
-  if (sel) {
-    sel.value = runMode;
-    const tag = $("set-run-mode-tag");
-    if (tag) tag.textContent = runMode === "auto" ? "自动并行" : (MODE_LABELS[runMode] || runMode);
-  }
-  // 多账户: 非 default 账户策略已绑定, 隐藏切换器并展示只读徽章
-  const lockedNote = $("run-mode-locked");
-  if (lockedNote) {
-    if (settingsData.strategy_locked) {
-      if (sel) sel.style.display = "none";
-      const lbl = settingsData.strategy_label || (MODE_LABELS[runMode] || runMode);
-      lockedNote.innerHTML = `🔒 该账户策略已固定为 <b>${escapeHtml(lbl)}</b>，不可在面板热改。如需更换策略，请到入口主页「重置账户」后重新绑定。`;
-      lockedNote.style.display = "block";
-    } else {
-      if (sel) sel.style.display = "";
-      lockedNote.style.display = "none";
-    }
-  }
-}
-
-async function saveRunMode() {
-  const sel = $("set-run-mode");
-  if (!sel) return;
-  const mode = sel.value;
-  setMsg("保存运行模式中…");
-  const res = await fetch(apiUrl("/api/settings/run_mode"), {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
-  }).then(r => r.json());
-  setMsg(res.msg || "保存失败", !res.ok);
-  if (res.ok) {
-    runMode = res.run_mode;
-    settingsData.run_mode = runMode;
-    const tag = $("set-run-mode-tag");
-    if (tag) tag.textContent = runMode === "auto" ? "自动并行" : (MODE_LABELS[runMode] || runMode);
-    // 让信号面板默认聚焦当前运行模式, 并立即重渲染 Tab (即时显示"●运行中"标记)
-    if (typeof lastSnapshot !== "undefined" && lastSnapshot) renderSignals(lastSnapshot);
-    if (runMode !== "auto") setActiveSigTab(runMode);
-    else if (sigActiveTab && sigActiveTab !== "auto") setActiveSigTab(enabledModes[0] || "donchian");
-  }
-}
-
-  async function saveModes() {
-    const modes = [...document.querySelectorAll("#set-modes input:checked")].map(x => x.dataset.mode);
-    if (!modes.length) { setMsg("❌ 至少需要一个模式", true); renderModeSettings(); return; }
-    setMsg("保存模式中…");
-    const res = await fetch(apiUrl("/api/settings/modes"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ modes }),
-    }).then(r => r.json());
-    setMsg(res.msg || "保存失败", !res.ok);
-    if (res.ok) {
-      settingsData.enabled_modes = res.modes;
-      enabledModes = res.modes;
-      renderModeSettings();
-    } else {
-      renderModeSettings();
-    }
-  }
-
-  function renderSymbolList() {
-    const box = $("set-symbol-list");
-    const positions = new Set(settingsData.has_positions || []);
-    if (!settingsData.symbols.length) {
-      box.innerHTML = `<span class="hint">暂无交易对</span>`;
-      return;
-    }
-    box.innerHTML = settingsData.symbols.map(sym => {
-      const locked = positions.has(sym);
-      return `<span class="chip ${locked ? "chip-locked" : ""}" title="${locked ? "有持仓, 需先平仓" : "点击移除"}">
-        <b>${sym}</b>${locked ? " 🔒" : `<span class="x" data-sym="${sym}">✕</span>`}
-      </span>`;
-    }).join("");
-    box.querySelectorAll(".x").forEach(el => {
-      el.addEventListener("click", async () => {
-        const sym = el.dataset.sym;
-        const next = settingsData.symbols.filter(s => s !== sym);
-        const res = await fetch(apiUrl("/api/settings/symbols"), {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbols: next }),
-        }).then(r => r.json());
-        setMsg(res.msg || (res.ok ? "✅ 已移除 " + sym : "操作失败"), !res.ok);
-        if (res.ok) { settingsData.symbols = res.symbols; renderSymbolList(); }
-      });
-    });
-  }
-
-  async function doSearch() {
-    const q = $("set-symbol-search").value.trim();
-    const box = $("set-search-results");
-    if (!q) { box.innerHTML = `<span class="hint">输入关键词搜索币种</span>`; return; }
-    box.innerHTML = `<span class="hint">搜索中…</span>`;
-    try {
-      const r = await fetch(apiUrl("/api/symbols/search?q=" + encodeURIComponent(q) + "&limit=30"));
-      const d = await r.json();
-      const results = (d.results || []).filter(x => !settingsData.symbols.includes(x.symbol));
-      if (!results.length) {
-        box.innerHTML = `<span class="hint">未找到匹配的币种 (或已在列表中)</span>`;
-        return;
-      }
-      box.innerHTML = results.map(x => `<span class="chip chip-add" data-sym="${x.symbol}" title="点击添加">+ ${x.symbol}</span>`).join("");
-      box.querySelectorAll(".chip-add").forEach(el => {
-        el.addEventListener("click", async () => {
-          const sym = el.dataset.sym;
-          const next = [...settingsData.symbols, sym];
-          const res = await fetch(apiUrl("/api/settings/symbols"), {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ symbols: next }),
-          }).then(r => r.json());
-          setMsg(res.msg || (res.ok ? "✅ 已添加 " + sym : "操作失败"), !res.ok);
-          if (res.ok) { settingsData.symbols = res.symbols; renderSymbolList(); doSearch(); }
-        });
-      });
-    } catch (e) {
-      box.innerHTML = `<span class="hint">搜索失败: ${e}</span>`;
-    }
-  }
-
-  $("btn-settings").addEventListener("click", () => {
-    $("settings-modal").style.display = "flex";
-    document.body.classList.add("modal-open");   // 锁定背景滚动, 防穿透
-    setMsg("");
-    loadSettings();
-  });
-  $("btn-settings-close").addEventListener("click", () => {
-    $("settings-modal").style.display = "none";
-    document.body.classList.remove("modal-open");
-  });
-  $("settings-modal").addEventListener("click", (e) => {
-    if (e.target.id === "settings-modal") {
-      $("settings-modal").style.display = "none";
-      document.body.classList.remove("modal-open");
-    }
-  });
-  $("btn-symbol-search").addEventListener("click", doSearch);
-  $("set-symbol-search").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
-  $("btn-save-api").addEventListener("click", async () => {
-    const key = $("set-api-key").value.trim();
-    const secret = $("set-api-secret").value.trim();
-    if (!key && !secret) { setMsg("请填写 API Key 和 Secret", true); return; }
-    setMsg("保存中…");
-    const res = await fetch(apiUrl("/api/settings/api"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: key, api_secret: secret }),
-    }).then(r => r.json());
-    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
-    loadSettings();
-  });
-
-  // ---------------- 风控与敞口 ----------------
-  function renderRiskSettings() {
-    const r = settingsData.risk || (cfg && cfg.risk) || {};
-    const l = settingsData.leverage || (cfg && cfg.leverage) || {};
-    const setVal = (id, v) => { const el = $(id); if (el && v != null) el.value = v; };
-    setVal("risk-total", r.max_total_position_notional);
-    setVal("risk-single", r.max_single_order_notional);
-    setVal("risk-margin", r.margin_per_position);
-    setVal("risk-positions", r.max_positions);
-    setVal("risk-dd", r.daily_loss_stop != null ? Math.round(r.daily_loss_stop * 100) : "");
-    setVal("risk-cooldown", r.cooldown_minutes);
-    setVal("risk-lev-mode", l.mode);
-    setVal("risk-lev-min", l.min);
-    setVal("risk-lev-max", l.max);
-    setVal("risk-lev-fixed", l.fixed);
-  }
-
-  async function saveRisk() {
-    const num = (id) => { const v = parseFloat($(id).value); return isNaN(v) ? null : v; };
-    const risk = {
-      max_total_position_notional: num("risk-total"),
-      max_single_order_notional: num("risk-single"),
-      margin_per_position: num("risk-margin"),
-      max_positions: num("risk-positions"),
-      daily_loss_stop: num("risk-dd") != null ? num("risk-dd") / 100 : null,
-      cooldown_minutes: num("risk-cooldown"),
-    };
-    Object.keys(risk).forEach(k => { if (risk[k] == null) delete risk[k]; });
-    const leverage = {
-      mode: $("risk-lev-mode").value,
-      min: num("risk-lev-min"),
-      max: num("risk-lev-max"),
-      fixed: num("risk-lev-fixed"),
-    };
-    Object.keys(leverage).forEach(k => { if (leverage[k] == null) delete leverage[k]; });
-    if (!Object.keys(risk).length && !Object.keys(leverage).length) {
-      setMsg("⚠ 没有可保存的值", true); return;
-    }
-    setMsg("保存风控中…");
-    const res = await fetch(apiUrl("/api/settings/risk"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ risk, leverage }),
-    }).then(r => r.json());
-    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
-    if (res.ok) {
-      settingsData.risk = res.risk;
-      settingsData.leverage = res.leverage;
-      renderRiskSettings();
-    }
-  }
-  $("btn-save-risk").addEventListener("click", saveRisk);
-
-  // ---------------- 交易网络切换 ----------------
-  function renderNetworkSettings() {
-    const net = settingsData.network || (cfg && cfg.network) || "testnet";
-    const m = settingsData.mainnet || (lastSnapshot && lastSnapshot.mainnet) || null;
-    const statusEl = $("set-net-status");
-    if (statusEl) {
-      statusEl.textContent = net === "mainnet"
-        ? "💰 主网 (真实资金)" : "🧪 测试网 (虚拟资金)";
-      statusEl.style.color = net === "mainnet" ? "var(--red)" : "var(--green)";
-    }
-    // 高亮当前选项; 主网未解锁时禁用主网按钮
-    document.querySelectorAll(".net-opt").forEach(b => {
-      b.classList.toggle("active", b.dataset.net === net);
-      if (b.dataset.net === "mainnet" && m && !m.unlocked) {
-        b.classList.add("disabled");
-      } else {
-        b.classList.remove("disabled");
-      }
-    });
-    // 解锁倒计时 / 档位 / 限额警告
-    const warnEl = $("set-net-unlock");
-    if (warnEl) {
-      if (m) {
-        warnEl.textContent = m.warning;
-        warnEl.style.display = "block";
-        warnEl.className = "net-unlock-warn" + (net === "mainnet" ? " on-main" : (m.unlocked ? " ok" : " lock"));
-      } else {
-        warnEl.style.display = "none";
-      }
-    }
-    // 自定义额度输入: 仅 t3 档位显示
-    const customRow = $("set-custom-row");
-    if (customRow) customRow.style.display = (m && m.tier === "t3") ? "flex" : "none";
-    const customInput = $("set-mainnet-custom");
-    if (customInput && m && m.custom_limit > 0) customInput.value = m.custom_limit;
-    // 主网输入框: 仅在主网时显示 (便于提前填好 Key)
-    const box = $("set-mainnet-box");
-    if (box) box.style.display = net === "mainnet" ? "block" : "none";
-
-    // 主网解锁倒计时 (按天): 复用后端 mainnet_cap_info 的 elapsed_days / next_days / tier
-    const cd = $("set-net-countdown");
-    if (cd && m) {
-      cd.style.display = "flex";
-      $("cd-elapsed").textContent = (m.elapsed_days != null) ? m.elapsed_days : "--";
-      const nextEl = $("cd-next");
-      const nextLabel = $("cd-next-label");
-      if (m.next_days != null) {
-        nextEl.textContent = m.next_days;
-        nextLabel.textContent = (m.tier === "locked") ? "距开放(天)" : "距下一档(天)";
-        cd.classList.toggle("cd-locked", m.tier === "locked");
-        cd.classList.remove("cd-done");
-      } else {
-        nextEl.textContent = "✓";
-        nextLabel.textContent = "已全解锁";
-        cd.classList.add("cd-done");
-        cd.classList.remove("cd-locked");
-      }
-      $("cd-tier").textContent = m.tier || "--";
-} else if (cd) {
-        cd.style.display = "none";
-      }
-  }
-
-  // ---------------- 盈亏模块 (起始资金 / 现有 / 盈亏比例) ----------------
-  function renderPnl() {
-    const init = Number(settingsData.initial_capital || 0);
-    const cur = Number(settingsData.equity || 0);
-    const initEl = $("pnl-init");
-    const curEl = $("pnl-cur");
-    const pctEl = $("pnl-pct");
-    const pctCard = pctEl && pctEl.parentElement;
-    if (initEl) initEl.textContent = init > 0 ? fmt(init) + " U" : "--";
-    if (curEl) curEl.textContent = fmt(cur) + " U";
-    if (pctEl) {
-      pctEl.textContent = "--";
-      if (pctCard) pctCard.classList.remove("pnl-gain", "pnl-loss", "pnl-flat");
-      if (init > 0) {
-        const pnl = cur - init;
-        const pct = (pnl / init) * 100;
-        const sign = pnl > 0 ? "+" : "";
-        pctEl.textContent = `${sign}${pct.toFixed(2)}%`;
-        if (pctCard) {
-          pctCard.classList.add(pnl > 0 ? "pnl-gain" : (pnl < 0 ? "pnl-loss" : "pnl-flat"));
-        }
-      }
-    }
-    const inp = $("set-pnl-init");
-    if (inp && init > 0) inp.value = init;
-  }
-
-  async function savePnlInit() {
-    const inp = $("set-pnl-init");
-    const v = parseFloat(inp.value);
-    if (!v || v <= 0) {
-      setMsg("❌ 请输入大于 0 的起始资金", true);
-      return;
-    }
-    try {
-      const res = await fetch(apiUrl("/api/settings/initial_capital"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: v }),
-      });
-      const data = await res.json();
-      if (!data.ok) { setMsg("❌ " + (data.msg || "保存失败"), true); return; }
-      settingsData.initial_capital = data.initial_capital;
-      settingsData.equity = data.equity;
-      renderPnl();
-      setMsg(data.msg || "✅ 起始资金已保存");
-    } catch (e) {
-      setMsg("❌ 保存失败: " + e, true);
-    }
-  }
-
-  // ---------------- 开机自启 (macOS launchd) ----------------
-  function renderAutostart() {
-    const a = settingsData.autostart;
-    const statusEl = $("set-autostart-status");
-    const btn = $("btn-autostart");
-    if (!statusEl || !btn) return;
-    if (!a || !a.supported) {
-      statusEl.textContent = "❌ 当前系统不支持 (仅 macOS 支持 launchd)";
-      statusEl.style.color = "var(--muted)";
-      btn.textContent = "不支持";
-      btn.disabled = true;
-      return;
-    }
-    btn.disabled = false;
-    if (a.enabled) {
-      statusEl.textContent = "✅ 已开启 (下次登录/开机自动启动)";
-      statusEl.style.color = "var(--green)";
-      btn.textContent = "关闭开机自启";
-      btn.className = "btn btn-warn on";
-    } else {
-      statusEl.textContent = a.installed ? "⭘ 已安装但未加载" : "⭘ 未启用";
-      statusEl.style.color = "var(--muted)";
-      btn.textContent = "启用开机自启";
-      btn.className = "btn btn-ok";
-    }
-  }
-
-  async function switchNetwork(net) {
-    const m = settingsData.mainnet || (lastSnapshot && lastSnapshot.mainnet);
-    if (net === "mainnet" && m && !m.unlocked) {
-      alert("🔒 " + m.warning);
-      renderNetworkSettings();
-      return;
-    }
-    if (net === "mainnet") {
-      const ok = confirm(
-        "⚠️ 即将切换到【主网 / 真实资金】模式！\n\n" +
-        "此模式下的每一笔开仓/平仓都会动用你的真实资产。\n" +
-        "请确保:\n  · 已在下方填好主网 API Key/Secret\n  · 已合理设置风控与敞口上限\n\n" +
-        "确认切换? (取消则停留在测试网)"
-      );
-      if (!ok) { renderNetworkSettings(); return; }
-    } else {
-      const ok = confirm("切换回【测试网 / 虚拟资金】? (测试网使用虚拟资金, 不影响真实账户)");
-      if (!ok) { renderNetworkSettings(); return; }
-    }
-    setMsg("切换网络中…");
-    const res = await fetch(apiUrl("/api/settings/network"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ network: net }),
-    }).then(r => r.json());
-    setMsg(res.msg || (res.ok ? "✅ 已切换" : "切换失败"), !res.ok);
-    if (res.ok) {
-      settingsData.network = res.network;
-      if (cfg) cfg.network = res.network;
-      updateNetBanner();
-      renderNetworkSettings();
-      // 网络切换可能影响登录状态, 重新拉取一遍
-      loadSettings();
-    } else {
-      renderNetworkSettings();
-    }
-  }
-
-  document.querySelectorAll(".net-opt").forEach(b => {
-    b.addEventListener("click", () => {
-      const target = b.dataset.net;
-      const cur = settingsData.network || (cfg && cfg.network) || "testnet";
-      if (target === cur) return;
-      switchNetwork(target);
-    });
-  });
-
-  $("btn-save-mainnet").addEventListener("click", async () => {
-    const key = $("set-mainnet-key").value.trim();
-    const secret = $("set-mainnet-secret").value.trim();
-    if (!key && !secret) { setMsg("请填写主网 API Key 和 Secret", true); return; }
-    setMsg("保存主网 API 中…");
-    const res = await fetch(apiUrl("/api/settings/api"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mainnet_key: key, mainnet_secret: secret }),
-    }).then(r => r.json());
-    setMsg(res.msg || (res.ok ? "✅ 主网 API 已保存" : "保存失败"), !res.ok);
-    if (res.ok) {
-      settingsData.mainnet_configured = true;
-      $("set-mainnet-key").value = "";
-      $("set-mainnet-secret").value = "";
-    }
-  });
-
-  $("btn-save-mainnet-quota").addEventListener("click", async () => {
-    const limit = parseFloat($("set-mainnet-custom").value);
-    if (!limit || limit <= 0) { setMsg("请填写有效的自定义额度 (USDT)", true); return; }
-    setMsg("保存主网自定义额度中…");
-    const res = await fetch(apiUrl("/api/settings/mainnet-quota"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ custom_limit: limit }),
-    }).then(r => r.json());
-    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
-    if (res.ok) {
-      if (settingsData.mainnet) settingsData.mainnet.custom_limit = limit;
-      renderNetworkSettings();
-    }
-  });
-
-  // ---------------- 开机自启开关 ----------------
-  $("btn-autostart").addEventListener("click", async () => {
-    const a = settingsData.autostart;
-    if (!a || !a.supported) { setMsg("❌ 当前系统不支持开机自启 (仅 macOS)", true); return; }
-    const enabled = !a.enabled;
-    setMsg(enabled ? "正在开启开机自启…" : "正在关闭开机自启…");
-    const res = await fetch(apiUrl("/api/settings/autostart"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    }).then(r => r.json());
-    setMsg(res.msg || (res.ok ? "✅ 已保存" : "操作失败"), !res.ok);
-    if (res.ok) {
-      // 重新拉取状态以刷新按钮/文案 (避免重复绑定监听)
-      try {
-        const r = await fetch(apiUrl("/api/settings"));
-        settingsData = await r.json();
-        enabledModes = settingsData.enabled_modes || [];
-        modeWeights = settingsData.mode_weights || {};
-      } catch (e) { /* 用返回 msg 即可 */ }
-      renderAutostart();
-    }
-  });
-
-  $("btn-save-pnl-init").addEventListener("click", savePnlInit);
-
-  // 运行模式选择器 (自动 / 指定策略)
-  const rmSel = document.getElementById("set-run-mode");
-  if (rmSel) rmSel.addEventListener("change", saveRunMode);
-
-  window.addEventListener("resize", () => {
-    if (lastSnapshot) drawChart(lastSnapshot.equity_history, lastSnapshot.day_start_equity);
-  });
 }
 
 // ---------------- 入口主页 (多账户落地页) ----------------
@@ -1421,10 +912,13 @@ function initEntry() {
   document.title = "Binance 测试网 · 多账户量化控制台";
   loadEntry();
   setInterval(loadEntry, 5000);
+  loadEntryAutostart();
   const form = $("bind-form");
   if (form) form.addEventListener("submit", onBindSubmit);
   const rf = $("entry-refresh");
   if (rf) rf.addEventListener("click", loadEntry);
+  const ab = $("entry-autostart-btn");
+  if (ab) ab.addEventListener("click", toggleEntryAutostart);
   $("btn-pause") && ($("btn-pause").style.display = "none");
 }
 
@@ -1535,6 +1029,7 @@ function renderEntryAccounts(ov, a) {
         <div><span class="m-label">持仓</span><span class="mono">${x.open_positions}</span></div>
       </div>
       <div class="acc-actions">
+        <button class="btn btn-ghost btn-sm acc-settings" data-name="${escapeHtml(x.name)}">⚙️ 设置</button>
         <button class="btn btn-ok btn-sm acc-open" data-name="${escapeHtml(x.name)}">打开面板</button>
         <button class="btn btn-ghost btn-sm acc-toggle" data-name="${escapeHtml(x.name)}" data-enabled="${x.enabled ? "0" : "1"}">${x.enabled ? "停用" : "启用"}</button>
         <button class="btn btn-warn btn-sm acc-reset" data-name="${escapeHtml(x.name)}">重置账户</button>
@@ -1546,6 +1041,7 @@ function renderEntryAccounts(ov, a) {
   list.querySelectorAll(".acc-open").forEach(b => b.addEventListener("click", () => {
     window.open("/?account=" + encodeURIComponent(b.dataset.name), "_blank");
   }));
+  list.querySelectorAll(".acc-settings").forEach(b => b.addEventListener("click", () => openEntrySettings(b.dataset.name)));
   list.querySelectorAll(".acc-toggle").forEach(b => b.addEventListener("click", () => onToggle(b.dataset.name, b.dataset.enabled === "1")));
   list.querySelectorAll(".acc-reset").forEach(b => b.addEventListener("click", () => onReset(b.dataset.name)));
   list.querySelectorAll(".acc-unbind").forEach(b => b.addEventListener("click", () => onUnbind(b.dataset.name)));
@@ -1631,8 +1127,492 @@ async function onUnbind(name) {
   } catch (e) { alert("解绑失败: " + e); }
 }
 
+// ==================== 设置弹窗 (入口页 / 面板共用同一份 DOM) ====================
+let _loadSettings = null;   // 由 initSettings 注入, 供入口页「账户设置」抽屉调用
+
+function openEntrySettings(name) {
+  gSettingsAccount = name;
+  const modal = $("settings-modal");
+  if (!modal) return;
+  const head = modal.querySelector(".modal-head span");
+  if (head) head.textContent = `⚙️ ${name} · 账户设置`;
+  modal.style.display = "flex";
+  document.body.classList.add("modal-open");
+  setMsg("");
+  if (_loadSettings) _loadSettings();
+}
+
+function closeEntrySettings() {
+  gSettingsAccount = null;
+  const modal = $("settings-modal");
+  if (modal) modal.style.display = "none";
+  document.body.classList.remove("modal-open");
+  const head = modal && modal.querySelector(".modal-head span");
+  if (head) head.textContent = "⚙️ 系统设置";
+}
+
+// ---------------- 全局开机自启 (入口页单次, 不针对单账户) ----------------
+let entryAutostartState = null;
+async function loadEntryAutostart() {
+  try {
+    const d = await (await fetch("/api/settings")).json();
+    entryAutostartState = d.autostart || null;
+    renderEntryAutostart(entryAutostartState);
+  } catch (e) { /* ignore */ }
+}
+function renderEntryAutostart(a) {
+  const statusEl = $("entry-autostart-status");
+  const btn = $("entry-autostart-btn");
+  if (!statusEl || !btn) return;
+  if (!a || !a.supported) {
+    statusEl.textContent = "❌ 当前系统不支持 (仅 macOS 支持 launchd)";
+    statusEl.style.color = "var(--muted)";
+    btn.textContent = "不支持";
+    btn.disabled = true;
+    return;
+  }
+  btn.disabled = false;
+  if (a.enabled) {
+    statusEl.textContent = "✅ 已开启 (下次登录/开机自动启动)";
+    statusEl.style.color = "var(--green)";
+    btn.textContent = "关闭开机自启";
+    btn.className = "btn btn-warn on";
+  } else {
+    statusEl.textContent = a.installed ? "⭘ 已安装但未加载" : "⭘ 未启用";
+    statusEl.style.color = "var(--muted)";
+    btn.textContent = "启用开机自启";
+    btn.className = "btn btn-ok";
+  }
+}
+async function toggleEntryAutostart() {
+  if (!entryAutostartState || !entryAutostartState.supported) return;
+  const enabled = !entryAutostartState.enabled;
+  const btn = $("entry-autostart-btn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch("/api/settings/autostart", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }).then(r => r.json());
+    if (!res.ok) alert(res.msg || "操作失败");
+    await loadEntryAutostart();
+  } catch (e) { alert("操作失败: " + e); }
+  finally { const b = $("entry-autostart-btn"); if (b) b.disabled = false; }
+}
+
+function initSettings() {
+  // 静态元素监听 (动态内容由各 render 函数内部绑定)
+  $("btn-settings-close").addEventListener("click", closeEntrySettings);
+  $("settings-modal").addEventListener("click", (e) => {
+    if (e.target.id === "settings-modal") closeEntrySettings();
+  });
+  $("btn-symbol-search").addEventListener("click", doSearch);
+  $("set-symbol-search").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+  $("btn-save-api").addEventListener("click", async () => {
+    const key = $("set-api-key").value.trim();
+    const secret = $("set-api-secret").value.trim();
+    if (!key && !secret) { setMsg("请填写 API Key 和 Secret", true); return; }
+    setMsg("保存中…");
+    const res = await fetch(apiUrl("/api/settings/api"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: key, api_secret: secret }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
+    loadSettings();
+  });
+  $("btn-save-risk").addEventListener("click", saveRisk);
+  document.querySelectorAll(".net-opt").forEach(b => {
+    b.addEventListener("click", () => {
+      const target = b.dataset.net;
+      const cur = settingsData.network || (cfg && cfg.network) || "testnet";
+      if (target === cur) return;
+      switchNetwork(target);
+    });
+  });
+  $("btn-save-mainnet").addEventListener("click", async () => {
+    const key = $("set-mainnet-key").value.trim();
+    const secret = $("set-mainnet-secret").value.trim();
+    if (!key && !secret) { setMsg("请填写主网 API Key 和 Secret", true); return; }
+    setMsg("保存主网 API 中…");
+    const res = await fetch(apiUrl("/api/settings/api"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mainnet_key: key, mainnet_secret: secret }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 主网 API 已保存" : "保存失败"), !res.ok);
+    if (res.ok) {
+      settingsData.mainnet_configured = true;
+      $("set-mainnet-key").value = "";
+      $("set-mainnet-secret").value = "";
+    }
+  });
+  $("btn-save-mainnet-quota").addEventListener("click", async () => {
+    const limit = parseFloat($("set-mainnet-custom").value);
+    if (!limit || limit <= 0) { setMsg("请填写有效的自定义额度 (USDT)", true); return; }
+    setMsg("保存主网自定义额度中…");
+    const res = await fetch(apiUrl("/api/settings/mainnet-quota"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ custom_limit: limit }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
+    if (res.ok) {
+      if (settingsData.mainnet) settingsData.mainnet.custom_limit = limit;
+      renderNetworkSettings();
+    }
+  });
+  $("btn-save-pnl-init").addEventListener("click", savePnlInit);
+  const rmSel = document.getElementById("set-run-mode");
+  if (rmSel) rmSel.addEventListener("change", saveRunMode);
+  window.addEventListener("resize", () => {
+    if (lastSnapshot) drawChart(lastSnapshot.equity_history, lastSnapshot.day_start_equity);
+  });
+
+  // 暴露给入口页「账户设置」抽屉
+  _loadSettings = loadSettings;
+
+  // ---------- 以下函数原内联于面板, 现模块级共用 ----------
+  async function loadSettings() {
+    try {
+      const r = await fetch(apiUrl("/api/settings"));
+      settingsData = await r.json();
+      const api = settingsData.api || {};
+      let statusText;
+      if (api.mode !== "live") {
+        statusText = "🟡 模拟模式 (paper) - 无需登录";
+      } else if (api.verified === true) {
+        statusText = `🔑 已登录 (${api.key_masked})` + (api.wallet != null ? ` · 钱包 ${fmt(api.wallet)} U` : "");
+      } else if (api.verified === false) {
+        statusText = api.configured ? "🔒 已配置但登录失败 (Key 无效)" : "🔒 未登录 - 请填写 API Key/Secret";
+      } else {
+        statusText = "⏳ 验证中…";
+      }
+      $("set-api-status").textContent = statusText;
+      if (api.verified === true) {
+        $("set-api-key").value = "";
+        $("set-api-secret").value = "";
+        $("set-api-key").placeholder = api.key_masked;
+      }
+      enabledModes = settingsData.enabled_modes || [];
+      modeWeights = settingsData.mode_weights || {};
+      renderModeSettings();
+      renderSymbolList();
+      renderRiskSettings();
+      renderNetworkSettings();
+      renderPnl();
+    } catch (e) {
+      setMsg("❌ 加载设置失败: " + e, true);
+    }
+  }
+
+  function renderModeSettings() {
+    const box = $("set-modes");
+    if (!box) return;
+    if (settingsData.run_mode) runMode = settingsData.run_mode;
+    const all = settingsData.all_modes || [];
+    box.innerHTML = all.map(m => {
+      const on = (settingsData.enabled_modes || []).includes(m);
+      const w = (settingsData.mode_weights || {})[m];
+      const wTxt = w != null ? fmt(w, 2) + "x" : "1.00x";
+      return `<label class="mode-card ${on ? "on" : ""}" data-mode="${m}">
+        <input type="checkbox" data-mode="${m}" ${on ? "checked" : ""}>
+        <span class="mc-name">${MODE_LABELS[m] || m}</span>
+        <span class="mc-weight">权重 ${wTxt}</span>
+      </label>`;
+    }).join("");
+    box.querySelectorAll("input[type=checkbox]").forEach(cb => {
+      cb.addEventListener("change", saveModes);
+    });
+    const sel = $("set-run-mode");
+    if (sel) {
+      sel.value = runMode;
+      const tag = $("set-run-mode-tag");
+      if (tag) tag.textContent = runMode === "auto" ? "自动并行" : (MODE_LABELS[runMode] || runMode);
+    }
+    const lockedNote = $("run-mode-locked");
+    if (lockedNote) {
+      if (settingsData.strategy_locked) {
+        if (sel) sel.style.display = "none";
+        const lbl = settingsData.strategy_label || (MODE_LABELS[runMode] || runMode);
+        lockedNote.innerHTML = `🔒 该账户策略已固定为 <b>${escapeHtml(lbl)}</b>，不可在面板热改。如需更换策略，请到入口主页「重置账户」后重新绑定。`;
+        lockedNote.style.display = "block";
+      } else {
+        if (sel) sel.style.display = "";
+        lockedNote.style.display = "none";
+      }
+    }
+  }
+
+  async function saveRunMode() {
+    const sel = $("set-run-mode");
+    if (!sel) return;
+    const mode = sel.value;
+    setMsg("保存运行模式中…");
+    const res = await fetch(apiUrl("/api/settings/run_mode"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    }).then(r => r.json());
+    setMsg(res.msg || "保存失败", !res.ok);
+    if (res.ok) {
+      runMode = res.run_mode;
+      settingsData.run_mode = runMode;
+      const tag = $("set-run-mode-tag");
+      if (tag) tag.textContent = runMode === "auto" ? "自动并行" : (MODE_LABELS[runMode] || runMode);
+      if (typeof lastSnapshot !== "undefined" && lastSnapshot) renderSignals(lastSnapshot);
+      if (runMode !== "auto") setActiveSigTab(runMode);
+      else if (sigActiveTab && sigActiveTab !== "auto") setActiveSigTab(enabledModes[0] || "donchian");
+    }
+  }
+
+  async function saveModes() {
+    const modes = [...document.querySelectorAll("#set-modes input:checked")].map(x => x.dataset.mode);
+    if (!modes.length) { setMsg("❌ 至少需要一个模式", true); renderModeSettings(); return; }
+    setMsg("保存模式中…");
+    const res = await fetch(apiUrl("/api/settings/modes"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ modes }),
+    }).then(r => r.json());
+    setMsg(res.msg || "保存失败", !res.ok);
+    if (res.ok) {
+      settingsData.enabled_modes = res.modes;
+      enabledModes = res.modes;
+      renderModeSettings();
+    } else {
+      renderModeSettings();
+    }
+  }
+
+  function renderSymbolList() {
+    const box = $("set-symbol-list");
+    const positions = new Set(settingsData.has_positions || []);
+    if (!settingsData.symbols.length) {
+      box.innerHTML = `<span class="hint">暂无交易对</span>`;
+      return;
+    }
+    box.innerHTML = settingsData.symbols.map(sym => {
+      const locked = positions.has(sym);
+      return `<span class="chip ${locked ? "chip-locked" : ""}" title="${locked ? "有持仓, 需先平仓" : "点击移除"}">
+        <b>${sym}</b>${locked ? " 🔒" : `<span class="x" data-sym="${sym}">✕</span>`}
+      </span>`;
+    }).join("");
+    box.querySelectorAll(".x").forEach(el => {
+      el.addEventListener("click", async () => {
+        const sym = el.dataset.sym;
+        const next = settingsData.symbols.filter(s => s !== sym);
+        const res = await fetch(apiUrl("/api/settings/symbols"), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbols: next }),
+        }).then(r => r.json());
+        setMsg(res.msg || (res.ok ? "✅ 已移除 " + sym : "操作失败"), !res.ok);
+        if (res.ok) { settingsData.symbols = res.symbols; renderSymbolList(); }
+      });
+    });
+  }
+
+  async function doSearch() {
+    const q = $("set-symbol-search").value.trim();
+    const box = $("set-search-results");
+    if (!q) { box.innerHTML = `<span class="hint">输入关键词搜索币种</span>`; return; }
+    box.innerHTML = `<span class="hint">搜索中…</span>`;
+    try {
+      const r = await fetch(apiUrl("/api/symbols/search?q=" + encodeURIComponent(q) + "&limit=30"));
+      const d = await r.json();
+      const results = (d.results || []).filter(x => !settingsData.symbols.includes(x.symbol));
+      if (!results.length) {
+        box.innerHTML = `<span class="hint">未找到匹配的币种 (或已在列表中)</span>`;
+        return;
+      }
+      box.innerHTML = results.map(x => `<span class="chip chip-add" data-sym="${x.symbol}" title="点击添加">+ ${x.symbol}</span>`).join("");
+      box.querySelectorAll(".chip-add").forEach(el => {
+        el.addEventListener("click", async () => {
+          const sym = el.dataset.sym;
+          const next = [...settingsData.symbols, sym];
+          const res = await fetch(apiUrl("/api/settings/symbols"), {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbols: next }),
+          }).then(r => r.json());
+          setMsg(res.msg || (res.ok ? "✅ 已添加 " + sym : "操作失败"), !res.ok);
+          if (res.ok) { settingsData.symbols = res.symbols; renderSymbolList(); doSearch(); }
+        });
+      });
+    } catch (e) {
+      box.innerHTML = `<span class="hint">搜索失败: ${e}</span>`;
+    }
+  }
+
+  function renderRiskSettings() {
+    const r = settingsData.risk || (cfg && cfg.risk) || {};
+    const l = settingsData.leverage || (cfg && cfg.leverage) || {};
+    const setVal = (id, v) => { const el = $(id); if (el && v != null) el.value = v; };
+    setVal("risk-total", r.max_total_position_notional);
+    setVal("risk-single", r.max_single_order_notional);
+    setVal("risk-margin", r.margin_per_position);
+    setVal("risk-positions", r.max_positions);
+    setVal("risk-dd", r.daily_loss_stop != null ? Math.round(r.daily_loss_stop * 100) : "");
+    setVal("risk-cooldown", r.cooldown_minutes);
+    setVal("risk-lev-mode", l.mode);
+    setVal("risk-lev-min", l.min);
+    setVal("risk-lev-max", l.max);
+    setVal("risk-lev-fixed", l.fixed);
+  }
+
+  async function saveRisk() {
+    const num = (id) => { const v = parseFloat($(id).value); return isNaN(v) ? null : v; };
+    const risk = {
+      max_total_position_notional: num("risk-total"),
+      max_single_order_notional: num("risk-single"),
+      margin_per_position: num("risk-margin"),
+      max_positions: num("risk-positions"),
+      daily_loss_stop: num("risk-dd") != null ? num("risk-dd") / 100 : null,
+      cooldown_minutes: num("risk-cooldown"),
+    };
+    Object.keys(risk).forEach(k => { if (risk[k] == null) delete risk[k]; });
+    const leverage = {
+      mode: $("risk-lev-mode").value,
+      min: num("risk-lev-min"),
+      max: num("risk-lev-max"),
+      fixed: num("risk-lev-fixed"),
+    };
+    Object.keys(leverage).forEach(k => { if (leverage[k] == null) delete leverage[k]; });
+    if (!Object.keys(risk).length && !Object.keys(leverage).length) {
+      setMsg("⚠ 没有可保存的值", true); return;
+    }
+    setMsg("保存风控中…");
+    const res = await fetch(apiUrl("/api/settings/risk"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ risk, leverage }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已保存" : "保存失败"), !res.ok);
+    if (res.ok) {
+      settingsData.risk = res.risk;
+      settingsData.leverage = res.leverage;
+      renderRiskSettings();
+    }
+  }
+
+  function renderNetworkSettings() {
+    const net = settingsData.network || (cfg && cfg.network) || "testnet";
+    const m = settingsData.mainnet || (lastSnapshot && lastSnapshot.mainnet) || null;
+    const statusEl = $("set-net-status");
+    if (statusEl) {
+      statusEl.textContent = net === "mainnet" ? "💰 主网 (真实资金)" : "🧪 测试网 (虚拟资金)";
+      statusEl.style.color = net === "mainnet" ? "var(--red)" : "var(--green)";
+    }
+    document.querySelectorAll(".net-opt").forEach(b => {
+      b.classList.toggle("active", b.dataset.net === net);
+      if (b.dataset.net === "mainnet" && m && !m.unlocked) b.classList.add("disabled");
+      else b.classList.remove("disabled");
+    });
+    const warnEl = $("set-net-unlock");
+    if (warnEl) {
+      if (m) {
+        warnEl.textContent = m.warning;
+        warnEl.style.display = "block";
+        warnEl.className = "net-unlock-warn" + (net === "mainnet" ? " on-main" : (m.unlocked ? " ok" : " lock"));
+      } else {
+        warnEl.style.display = "none";
+      }
+    }
+    const customRow = $("set-custom-row");
+    if (customRow) customRow.style.display = (m && m.tier === "t3") ? "flex" : "none";
+    const customInput = $("set-mainnet-custom");
+    if (customInput && m && m.custom_limit > 0) customInput.value = m.custom_limit;
+    const box = $("set-mainnet-box");
+    if (box) box.style.display = net === "mainnet" ? "block" : "none";
+    const cd = $("set-net-countdown");
+    if (cd && m) {
+      cd.style.display = "flex";
+      $("cd-elapsed").textContent = (m.elapsed_days != null) ? m.elapsed_days : "--";
+      const nextEl = $("cd-next");
+      const nextLabel = $("cd-next-label");
+      if (m.next_days != null) {
+        nextEl.textContent = m.next_days;
+        nextLabel.textContent = (m.tier === "locked") ? "距开放(天)" : "距下一档(天)";
+        cd.classList.toggle("cd-locked", m.tier === "locked");
+        cd.classList.remove("cd-done");
+      } else {
+        nextEl.textContent = "✓";
+        nextLabel.textContent = "已全解锁";
+        cd.classList.add("cd-done");
+        cd.classList.remove("cd-locked");
+      }
+      $("cd-tier").textContent = m.tier || "--";
+    } else if (cd) {
+      cd.style.display = "none";
+    }
+  }
+
+  function renderPnl() {
+    const init = Number(settingsData.initial_capital || 0);
+    const cur = Number(settingsData.equity || 0);
+    const initEl = $("pnl-init");
+    const curEl = $("pnl-cur");
+    const pctEl = $("pnl-pct");
+    const pctCard = pctEl && pctEl.parentElement;
+    if (initEl) initEl.textContent = init > 0 ? fmt(init) + " U" : "--";
+    if (curEl) curEl.textContent = fmt(cur) + " U";
+    if (pctEl) {
+      pctEl.textContent = "--";
+      if (pctCard) pctCard.classList.remove("pnl-gain", "pnl-loss", "pnl-flat");
+      if (init > 0) {
+        const pnl = cur - init;
+        const pct = (pnl / init) * 100;
+        const psign = pnl > 0 ? "+" : "";
+        pctEl.textContent = `${psign}${pct.toFixed(2)}%`;
+        if (pctCard) pctCard.classList.add(pnl > 0 ? "pnl-gain" : (pnl < 0 ? "pnl-loss" : "pnl-flat"));
+      }
+    }
+    const inp = $("set-pnl-init");
+    if (inp && init > 0) inp.value = init;
+  }
+
+  async function savePnlInit() {
+    const inp = $("set-pnl-init");
+    const v = parseFloat(inp.value);
+    if (!v || v <= 0) { setMsg("❌ 请输入大于 0 的起始资金", true); return; }
+    try {
+      const res = await fetch(apiUrl("/api/settings/initial_capital"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: v }),
+      });
+      const data = await res.json();
+      if (!data.ok) { setMsg("❌ " + (data.msg || "保存失败"), true); return; }
+      settingsData.initial_capital = data.initial_capital;
+      settingsData.equity = data.equity;
+      renderPnl();
+      setMsg(data.msg || "✅ 起始资金已保存");
+    } catch (e) { setMsg("❌ 保存失败: " + e, true); }
+  }
+
+  async function switchNetwork(net) {
+    const m = settingsData.mainnet || (lastSnapshot && lastSnapshot.mainnet);
+    if (net === "mainnet" && m && !m.unlocked) { alert("🔒 " + m.warning); renderNetworkSettings(); return; }
+    if (net === "mainnet") {
+      const ok = confirm("⚠️ 即将切换到【主网 / 真实资金】模式！\n\n此模式下的每一笔开仓/平仓都会动用你的真实资产。\n请确保:\n  · 已在下方填好主网 API Key/Secret\n  · 已合理设置风控与敞口上限\n\n确认切换? (取消则停留在测试网)");
+      if (!ok) { renderNetworkSettings(); return; }
+    } else {
+      const ok = confirm("切换回【测试网 / 虚拟资金】? (测试网使用虚拟资金, 不影响真实账户)");
+      if (!ok) { renderNetworkSettings(); return; }
+    }
+    setMsg("切换网络中…");
+    const res = await fetch(apiUrl("/api/settings/network"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ network: net }),
+    }).then(r => r.json());
+    setMsg(res.msg || (res.ok ? "✅ 已切换" : "切换失败"), !res.ok);
+    if (res.ok) {
+      settingsData.network = res.network;
+      if (cfg) cfg.network = res.network;
+      updateNetBanner();
+      renderNetworkSettings();
+      loadSettings();
+    } else {
+      renderNetworkSettings();
+    }
+  }
+}
+
 // ---------------- 入口路由 ----------------
 document.addEventListener("DOMContentLoaded", () => {
+  initSettings();   // 始终装配设置弹窗监听 (面板与入口页共用)
   if (ACCOUNT) {
     initPanel(ACCOUNT);
   } else {

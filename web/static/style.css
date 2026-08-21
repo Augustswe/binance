@@ -452,7 +452,6 @@ body.modal-open { overflow: hidden; }
 html[data-view="panel"] #entry-view { display: none !important; }
 html[data-view="entry"] .topbar,
 html[data-view="entry"] #net-banner,
-html[data-view="entry"] #settings-modal,
 html[data-view="entry"] main,
 html[data-view="entry"] #log-term,
 html[data-view="entry"] #log-term-btn { display: none !important; }
@@ -506,3 +505,16 @@ html[data-view="entry"] #log-term-btn { display: none !important; }
   background: rgba(240,185,11,.08); border: 1px solid var(--yellow); color: var(--yellow);
 }
 .run-mode-locked b { color: var(--text); }
+
+/* 入口页: 全局开机自启区块 */
+.entry-autostart .modal-row { margin-top: 10px; align-items: center; }
+.entry-autostart .modal-label { width: auto; }
+.entry-autostart #entry-autostart-status { font-weight: 600; }
+
+/* 入口页账户卡片: 「⚙️ 设置」按钮 (打开按账户路由的设置抽屉) */
+.acc-actions .acc-settings { border-color: var(--accent); color: var(--accent); }
+.acc-actions .acc-settings:hover { background: var(--accent); color: #0c0e13; border-color: var(--accent); }
+
+/* 设置弹窗标题 (按账户动态显示) */
+.modal-head { display: flex; align-items: center; justify-content: space-between; }
+.modal-head > span:first-child { font-size: 16px; font-weight: 600; }

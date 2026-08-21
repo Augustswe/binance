@@ -28,6 +28,17 @@
     </div>
   </header>
 
+  <!-- 全局: 开机自启 (单次, 全局生效, 不针对单个账户) -->
+  <section class="panel entry-autostart" id="entry-autostart">
+    <div class="panel-title">⏻ 开机自启 <span class="hint">登录后自动启动 (macOS 用 launchd); 仅 macOS 支持 · 全局生效</span></div>
+    <div class="modal-row">
+      <span class="modal-label">当前状态:</span>
+      <span id="entry-autostart-status" class="mono">--</span>
+      <button class="btn btn-ok" id="entry-autostart-btn" type="button">启用开机自启</button>
+      <span class="hint">启用后下次登录/开机自动运行; 当前手动实例不受影响</span>
+    </div>
+  </section>
+
   <!-- 盈亏总览 -->
   <section class="panel entry-ov">
     <div class="panel-title">📊 盈亏总览 <span class="hint">全部绑定账户聚合 · 每 5 秒自动刷新</span></div>
@@ -114,7 +125,6 @@
     <span id="account-chip" class="badge" style="display:none" title="当前账户 · 策略"></span>
     <button id="btn-pause" class="btn btn-warn">暂停</button>
     <button id="btn-reset" class="btn btn-ghost">重置今日</button>
-    <button id="btn-settings" class="btn btn-ghost">⚙️ 设置</button>
   </div>
 </header>
 
@@ -202,19 +212,6 @@
             <button class="btn btn-ok" id="btn-save-mainnet-quota" type="button">设置</button>
             <span class="hint">仅跑满90天(t3)后可自定义主网总持仓限额</span>
           </div>
-        </div>
-      </div>
-      <hr class="modal-hr">
-      <!-- 开机自启 -->
-      <div class="modal-sec">
-        <div class="modal-sec-title">开机自启 <span class="hint">登录后自动启动 (macOS 用 launchd / Windows 用启动文件夹); 仅 macOS / Windows 支持</span></div>
-        <div class="modal-row">
-          <span class="modal-label">当前状态:</span>
-          <span id="set-autostart-status" class="mono">--</span>
-        </div>
-        <div class="modal-row">
-          <button class="btn btn-ok" id="btn-autostart" type="button">启用开机自启</button>
-          <span class="hint">启用后下次登录自动运行; 当前手动实例不受影响</span>
         </div>
       </div>
       <hr class="modal-hr">
