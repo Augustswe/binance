@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+import requests
 from pathlib import Path
 
 import numpy as np
@@ -152,6 +153,17 @@ def learn(cfg: dict, days: int = 90, pool: list | None = None) -> dict:
     """跑一轮进化学习: 评估策略池全部组合, 返回排名与最优, 记录历史轮次"""
     log = get_logger("learner")
     pool = pool or STRATEGY_POOL
+    # 主网可达性快速探测: 不可达则秒退, 避免每个组合都卡满 20s 超时 (~30 分钟冻心跳)
+    try:
+        _pr = requests.get(
+            f"{MAINNET_BASE_URL}/fapi/v1/klines",
+            params={"symbol": "BTCUSDT", "interval": "4h", "limit": 2},
+            timeout=8,
+        )
+        _pr.raise_for_status()
+    except Exception as _e:
+        log.warning("主网不可达(fapi.binance.com), 跳过本轮自动学习: %s", _e)
+        return {"error": "mainnet unreachable", "skipped": True}
     results = []
     for combo in pool:
         try:

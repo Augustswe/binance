@@ -1419,14 +1419,22 @@ class TradingEngine:
         self.state.save()
 
     async def _maybe_learn(self):
-        """自动学习: 启动后立即学一轮, 之后每 learner_interval 秒学一轮"""
+        """自动学习: 启动后立即学一轮, 之后每 learner_interval 秒学一轮。
+        后台线程执行, 不阻塞主循环心跳; 主网不可达时 learn() 内部会秒退。"""
         if not self.learner_enabled:
             return
         now = time.time()
         if now - self._last_learn_ts < self.learner_interval:
             return
+        # 防止上一轮仍在后台跑时重复触发
+        if getattr(self, "_learning_task", None) is not None and not self._learning_task.done():
+            return
         self._last_learn_ts = now
-        self.log.info("===== 开始自动学习进化 (最近%d天, 策略池评估) =====", self.learner_days)
+        self.log.info("===== 开始自动学习进化 (最近%d天, 策略池评估, 后台执行不阻塞心跳) =====", self.learner_days)
+        self._learning_task = asyncio.ensure_future(self._learn_worker())
+
+    async def _learn_worker(self):
+        """后台执行一轮学习: 主循环心跳不会被阻塞, 异常被吞不杀引擎"""
         try:
             result = await asyncio.to_thread(learn, self.cfg, days=self.learner_days)
         except Exception as e:
@@ -1435,7 +1443,8 @@ class TradingEngine:
             return
         if result.get("error"):
             self.log.error("自动学习失败: %s", result["error"])
-            self.state.add_event("error", f"⚠️ 自动学习失败: {result['error']}")
+            if not result.get("skipped"):
+                self.state.add_event("error", f"⚠️ 自动学习失败: {result['error']}")
             return
         best = result["best"]
         rankings = result["rankings"]
