@@ -295,16 +295,37 @@ body.modal-open { overflow: hidden; }
 .sig-tab-panel .empty { padding: 28px 12px; }
 .sig-tbl { width: 100%; border-collapse: collapse; }
 
+/* TP/SL 列: 显眼的「市价止盈止损」按钮 */
+.tpsl-cell {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  min-width: 140px;
+}
+.tpsl-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 600; line-height: 1.2;
+  background: rgba(240,185,11,.12); color: var(--yellow);
+  border: 1px solid var(--yellow);
+  transition: all .15s;
+  white-space: nowrap;
+}
+.tpsl-btn:hover { background: rgba(240,185,11,.22); filter: brightness(1.05); }
+.tpsl-btn.open {
+  background: var(--panel2); color: var(--muted); border-color: var(--border);
+}
+.tpsl-btn .bolt { font-size: 14px; }
+.tpsl-cur {
+  font-size: 12px; color: var(--muted); font-family: var(--mono);
+}
+.tpsl-active-tag {
+  font-size: 11px; color: var(--green); font-weight: 600;
+}
+
 /* 持仓行内联止盈止损编辑器 */
 .tpsl-detail > td { background: rgba(74,158,255,.06); border-bottom: 1px solid var(--border); padding: 0; }
 .tpsl-edit {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
   padding: 10px 12px;
-}
-.tpsl-edit .tag {
-  font-size: 12px; font-weight: 600; color: var(--yellow);
-  background: rgba(240,185,11,.12); border: 1px solid rgba(240,185,11,.4);
-  padding: 3px 9px; border-radius: 10px;
 }
 .tpsl-edit .lbl { font-size: 12px; color: var(--muted); }
 .tpsl-edit .hint { font-size: 12px; color: var(--muted); }

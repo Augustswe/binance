@@ -237,9 +237,6 @@ function renderSymbols(s) {
     const showLev = pos ? pos.leverage : sig.leverage;   // 有持仓显示真实杠杆, 无持仓显示计划杠杆
     const chgCls = chg >= 0 ? "pos" : "neg";
     const open = pos && tpslOpenSym === sym;
-    const opCell = pos
-      ? `<button class="btn btn-ghost btn-sm tpsl-btn" data-sym="${sym}">${open ? "收起" : "⚙ 止盈止损"}</button>`
-      : "--";
     html += `<tr data-sym="${sym}">
       <td><b>${sym}</b></td>
       <td class="mono">${fmtPrice(price)}</td>
@@ -251,12 +248,11 @@ function renderSymbols(s) {
       <td>${pos ? posPill(pos) : '<span class="pill pill-none">空仓</span>'}</td>
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
       <td class="mono ${cls(pos ? pos.upnl : 0)}">${pos ? sign(pos.upnl) + fmt(pos.upnl) : "--"}</td>
-      <td class="mono">${pos ? tpSlCell(pos) : "--"}</td>
-      <td>${opCell}</td>
+      <td>${pos ? tpSlCell(pos) : '<span class="hint">--</span>'}</td>
     </tr>`;
     if (open) html += tpslDetailRow(pos);
   }
-  tb.innerHTML = html || `<tr><td colspan="12" class="empty">暂无数据</td></tr>`;
+  tb.innerHTML = html || `<tr><td colspan="11" class="empty">暂无数据</td></tr>`;
 
   // 恢复焦点到正在编辑的输入框 (轮询重建后不打断输入)
   if (activeField && tpslOpenSym) {
@@ -270,11 +266,24 @@ function posPill(p) {
   return `<span class="pill ${p.side === "LONG" ? "pill-long" : "pill-short"}">${p.side === "LONG" ? "多" : "空"} ${p.qty} @${p.leverage}x</span>`;
 }
 
-// TP/SL 列: donchian 模式无固定TP, 显示"移动止损"替代 0.00
+// TP/SL 列: 显眼可点击的「市价止盈止损」按钮 (展开就地编辑器)
+// 点击 = 展开/收起该币种的 TP/SL 编辑器 (复用 .tpsl-btn 类, 走 tbody 事件委托)
 function tpSlCell(p) {
-  if (p.tp && p.tp > 0) return fmtPrice(p.tp) + " / " + fmtPrice(p.sl);
-  const lock = p.sl > 0 ? `移动止损 ${fmtPrice(p.sl)}` : "--";
-  return `<span title="海龟策略: 不设固定止盈, 用移动止损锁利 + 通道反向出场">∞ / ${lock}</span>`;
+  const open = tpslOpenSym === p.symbol;
+  const active = p.manual_tp_active || p.manual_sl_active;
+  const hasTP = p.tp > 0;
+  const hasSL = p.sl > 0;
+  const cur = (hasTP || hasSL)
+    ? `<span class="tpsl-cur">${hasTP ? fmtPrice(p.tp) : "∞"} / ${hasSL ? fmtPrice(p.sl) : "移动止损"}</span>`
+    : "";
+  const activeTag = active ? '<span class="tpsl-active-tag">● 已生效</span>' : "";
+  return `<div class="tpsl-cell">
+    <button class="tpsl-btn ${open ? "open" : ""}" data-sym="${p.symbol}" title="${open ? "收起止盈止损编辑器" : "点击设置市价止盈止损 (触发即市价成交)"}">
+      <span class="bolt">⚡</span> ${open ? "收起 ▲" : "市价止盈止损"}
+    </button>
+    ${cur}
+    ${activeTag}
+  </div>`;
 }
 
 function stratName(n) {
@@ -318,7 +327,7 @@ function setActiveSigTab(mode) {
   });
 }
 
-// 持仓行内联止盈止损: 点击「⚙ 止盈止损」就地展开编辑, 市价单 (触发即市价成交)
+// 持仓行内联止盈止损: 点击「⚡ 市价止盈止损」按钮就地展开编辑, 市价单 (触发即市价成交)
 function tpslDetailRow(p) {
   const sym = p.symbol;
   const mtp = p.manual_tp || null;
@@ -329,9 +338,8 @@ function tpslDetailRow(p) {
   const slType = c["sl-type"] || (msl ? msl.type : "price");
   const slVal = (c["sl-val"] !== undefined && c["sl-val"] !== "") ? c["sl-val"] : (msl ? msl.value : "");
   const active = p.manual_tp_active || p.manual_sl_active;
-  return `<tr class="tpsl-detail" data-sym="${sym}"><td colspan="12">
+  return `<tr class="tpsl-detail" data-sym="${sym}"><td colspan="11">
     <div class="tpsl-edit">
-      <span class="tag">市价止盈止损</span>
       <span class="lbl">止盈 TP</span>
       <select class="tp-type input mini">${opt(tpType, "price", "价格")}${opt(tpType, "pct", "% 百分比")}</select>
       <input class="tp-val input mini" type="number" step="any" placeholder="价格或%" value="${tpVal}">
