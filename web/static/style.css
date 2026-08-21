@@ -468,6 +468,7 @@ body.modal-open { overflow: hidden; }
 /* 终端内的日志列表: 填满窗口、等宽呈现 (覆盖 .log-list 默认高度) */
 .log-term .log-list {
   max-height: none; height: 100%; overflow-y: auto; overflow-x: auto;
+  overscroll-behavior: contain; /* 防止滚轮穿透到背后页面 */
   display: flex; flex-direction: column; gap: 2px;
   font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5;
   padding-right: 4px;
