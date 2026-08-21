@@ -2,7 +2,7 @@
 "use strict";
 
 const REFRESH_MS = 2000;
-const MODE_LABELS = { donchian: "Donchian", multi: "多策略", grid: "网格", ma_cross: "均线", rsi: "RSI", bollinger: "布林带" };
+const MODE_LABELS = { auto: "自动并行", donchian: "Donchian", multi: "多策略", grid: "网格", ma_cross: "均线", rsi: "RSI", bollinger: "布林带" };
 let cfg = null;
 let lastEquity = null;
 let lastSnapshot = null;
@@ -254,11 +254,22 @@ function renderSymbols(s) {
         if (pos && k.startsWith(pos.mode + ":")) break;
       }
     }
-    // 主导策略: 有持仓 → 持仓模式(真实在跑的策略); 无持仓 → 运行模式(单一策略即它本身)
-    //           auto/multi → 该币种各模式信号中评分最高/最优先触发的策略(数据驱动的主导策略)
+    // 主导策略:
+    //   有持仓且为系统本策略开仓 → 持仓真实策略(pos.mode, 例如 donchian/网格/均线)
+    //   有持仓但从交易所同步恢复(mode="交易所同步") → 交易所不记录原始开仓策略, 退回本账户运行模式
+    //   无持仓 → 运行模式(单一策略即它本身); auto/multi → 该币种各模式信号中评分最高/最优先触发的策略
     let domLabel = "--";
+    let domTitle = "";
     if (pos && pos.mode) {
-      domLabel = MODE_LABELS[pos.mode] || pos.mode;
+      if (pos.mode === "交易所同步") {
+        // 交易所同步持仓: 原始开仓策略在交易所侧不可知, 按本账户运行模式显示(单一策略账户即其真实策略)
+        const rm = s.run_mode;
+        const rmLabel = (rm && MODE_LABELS[rm]) ? MODE_LABELS[rm] : (rm || "未知");
+        domLabel = rmLabel;
+        domTitle = "本持仓为从交易所同步恢复, 交易所不记录原始开仓策略; 已按本账户运行模式(" + rmLabel + ")显示";
+      } else {
+        domLabel = MODE_LABELS[pos.mode] || pos.mode;
+      }
     } else {
       const rm = s.run_mode;
       if (rm && rm !== "auto" && rm !== "multi" && MODE_LABELS[rm]) {
@@ -285,7 +296,7 @@ function renderSymbols(s) {
       <td class="mono ${chgCls}">${chg == null ? "--" : sign(chg) + fmt(chg, 2) + "%"}</td>
       <td>${regimePill(sig.regime)}</td>
       <td>${scoreBar(sig.combined != null ? sig.combined : sig.score)}</td>
-      <td>${domLabel}</td>
+      <td title="${domTitle}">${domLabel}</td>
       <td class="mono" title="${pos ? '实际持仓杠杆 (开仓时定, 持仓期间不变)' : '计划开仓杠杆 (按信号强度动态)'}">${showLev ? showLev + "x" : "--"}</td>
       <td>${pos ? posPill(pos) : '<span class="pill pill-none">空仓</span>'}</td>
       <td class="mono">${pos ? fmtPrice(pos.entry) : "--"}</td>
