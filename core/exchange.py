@@ -283,11 +283,17 @@ class BinanceFutures:
     def set_margin_type(self, symbol: str, margin_type: str = "ISOLATED") -> dict:
         return self._signed("POST", "/fapi/v1/marginType", symbol=symbol, marginType=margin_type)
 
-    def market_order(self, symbol: str, side: str, quantity: float, reduce_only: bool = False) -> dict:
-        """side: BUY / SELL; reduce_only=True 时只减仓不反向开仓"""
-        params = dict(symbol=symbol, side=side, type="MARKET", quantity=quantity)
-        if reduce_only:
-            params["reduceOnly"] = "true"
+    def market_order(self, symbol: str, side: str, quantity: float, reduce_only: bool = False,
+                     close_position: bool = False) -> dict:
+        """side: BUY / SELL; reduce_only=True 时只减仓不反向开仓;
+        close_position=True 时按整仓平仓(Binance 推荐兜底, 无需 quantity, 规避 -2022)。"""
+        params = dict(symbol=symbol, side=side, type="MARKET")
+        if close_position:
+            params["closePosition"] = "true"
+        else:
+            params["quantity"] = quantity
+            if reduce_only:
+                params["reduceOnly"] = "true"
         return self._signed("POST", "/fapi/v1/order", **params)
 
     def place_stop_market(self, symbol: str, side: str, stop_price: float,

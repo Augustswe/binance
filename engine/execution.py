@@ -69,8 +69,10 @@ class LiveExecution(BaseExecution):
             self._setup_margin(symbol, leverage)
             order_side = "BUY" if side == "LONG" else "SELL"
             order = await self._to_thread(self.exchange.market_order, symbol, order_side, qty)
-            fill_price = float(order.get("avgPrice") or price)
-            fill_qty = float(order.get("executedQty") or qty)
+            # 测试网市价单即时响应有时 executedQty/avgPrice 回 "0", 落库时用请求量兜底,
+            # 否则本地记成 qty=0 → 本地敞口失真, 风控/减仓全部失明。
+            fill_price = float(order.get("avgPrice") or 0) or price
+            fill_qty = float(order.get("executedQty") or 0) or qty
             self.state.open_position(
                 symbol=symbol, side=side, qty=fill_qty, entry=fill_price,
                 leverage=leverage, notional=fill_qty * fill_price, upnl=0.0,
@@ -107,10 +109,20 @@ class LiveExecution(BaseExecution):
             except Exception as e:
                 self.log.warning("[live] 撤单失败 %s: %s", symbol, e)
             order_side = "SELL" if pos["side"] == "LONG" else "BUY"
-            order = await self._to_thread(
-                self.exchange.market_order, symbol, order_side, pos["qty"], reduce_only=True
-            )
-            fill_price = float(order.get("avgPrice") or exit_price)
+            try:
+                order = await self._to_thread(
+                    self.exchange.market_order, symbol, order_side, pos["qty"], reduce_only=True
+                )
+            except Exception as e:
+                # -2022 ReduceOnly Order is rejected: 持仓可能已被平/对冲模式, 改用整仓平仓兜底
+                if "ReduceOnly" in str(e) or "-2022" in str(e):
+                    self.log.warning("[live] %s reduceOnly 被拒, 改用 closePosition 整仓平仓: %s", symbol, e)
+                    order = await self._to_thread(
+                        self.exchange.market_order, symbol, order_side, close_position=True
+                    )
+                else:
+                    raise
+            fill_price = float(order.get("avgPrice") or 0) or exit_price
             trade = self.state.close_position(symbol, fill_price, reason)
             if trade:
                 self.log.info("[live] 平仓 %s %s %.4f@%.2f 盈亏 %.2fU 原因:%s",

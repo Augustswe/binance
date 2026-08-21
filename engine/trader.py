@@ -612,6 +612,11 @@ class TradingEngine:
         # 4.5) 兜底巡检: 确保每个持仓在交易所都有止损单 (行情断流也能止损)
         await self._ensure_exchange_stops()
 
+        # 4.6) 敞口上限兜底: 对继承/同步来的超限持仓强制减仓或熔断, 真正锁住敞口
+        #       (check_open / _try_open_mode 预算只拦"新开仓", 对历史/外部同步来的持仓无效)
+        if await self._enforce_exposure_cap():
+            return  # halt 模式: 已停机, 直接结束本轮
+
         # 5) 熔断
         if self.risk.should_halt(self.state):
             self.state.add_event("risk", f"🚨 熔断停机: {self.state.data['halt_reason']}")
@@ -632,6 +637,75 @@ class TradingEngine:
         if now - self._last_save_ts > 30:
             self.state.save()
             self._last_save_ts = now
+
+    async def _enforce_exposure_cap(self) -> bool:
+        """敞口上限兜底: 对『已存在 / 交易所同步』的超限持仓强制处理, 真正锁住敞口。
+
+        check_open / _try_open_mode 的预算只在『新开仓』时拦截, 对从历史/外部/重启同步
+        继承来的持仓无效 —— 那些持仓一旦超过上限就永远回不来 (即"敞口锁不住")。本函数在
+        每轮对账后统一核查总敞口, 超限时按配置处理:
+          enforce_exposure_cap = "reduce" → 自动平掉超出部分 (优先平名义价值大的), 直至回到上限内
+          enforce_exposure_cap = "halt"   → 熔断停机 + 通知, 不平仓, 等人工处理
+          enforce_exposure_cap = "off"    → 不处理 (维持现状: 只拦新开仓)
+        返回 True 表示已触发 halt (调用方应结束本轮循环)。
+        """
+        action = str(self.cfg["risk"].get("enforce_exposure_cap", "off")).lower()
+        if action == "off":
+            return False
+        r = self.cfg["risk"]
+        max_total = float(r["max_total_position_notional"])
+        pct = float(r.get("max_total_exposure_pct", 0) or 0)
+        eq = self.state.equity()
+        caps = [max_total]
+        if pct > 0 and eq > 0:
+            caps.append(eq * pct / 100.0)
+        cap = min(caps)
+        exp = self.state.exposure()
+        if exp <= cap + 1e-6:
+            return False
+        excess = exp - cap
+        pct_cap = eq * pct / 100.0 if pct > 0 else 0.0
+        self.log.warning(
+            "敞口超限兜底触发: exposure=%.1f > cap=%.1f (总持仓上限%.0f / 权益%d%%≈%.0f), 超出 %.1fU, 动作=%s",
+            exp, cap, max_total, int(pct), pct_cap, excess, action,
+        )
+        if action == "halt":
+            self.state.halt(
+                f"敞口超限 {exp:.0f}U > 上限 {cap:.0f}U (超 {excess:.0f}U), 已熔断停机待人工处理"
+            )
+            self.state.add_event("risk", f"🚨 敞口超限熔断: {exp:.0f}U > {cap:.0f}U")
+            await self._notify(
+                f"🚨 敞口超限熔断!\n总敞口 {exp:.0f}U 超过上限 {cap:.0f}U (超 {excess:.0f}U)\n"
+                f"已停机, 请人工处理后再恢复。"
+            )
+            return True
+        # reduce: 优先平掉名义价值大的持仓, 直到回到上限内
+        positions = sorted(
+            self.state.data["positions"].items(),
+            key=lambda kv: kv[1].get("notional", 0), reverse=True,
+        )
+        closed = 0
+        for sym, pos in positions:
+            if self.state.exposure() <= cap + 1e-6:
+                break
+            mark = (self.state.data["mark_prices"].get(sym)
+                    or self.state.data["prices"].get(sym) or pos.get("entry") or 0.0)
+            if not mark or mark <= 0:
+                continue
+            reason = f"风控减仓: 总敞口 {self.state.exposure():.0f}U 超过上限 {cap:.0f}U"
+            self.log.info("[%s] 敞口超限自动减仓 %s @ %.2f", sym, pos["side"], mark)
+            trade = await self.execution.close_position(sym, mark, reason)
+            if trade:
+                closed += 1
+                self.state.add_event(
+                    "risk",
+                    f"🚨 {sym} 敞口超限自动减仓 (@{mark:.2f}, 名义 {pos.get('notional', 0):.0f}U)",
+                )
+        if closed:
+            await self._notify(
+                f"🚨 敞口超限已自动减仓 {closed} 笔: 总敞口 {exp:.0f}U → 约 {self.state.exposure():.0f}U (上限 {cap:.0f}U)"
+            )
+        return False
 
     def _cycle_due(self, symbol: str) -> bool:
         last = self._last_cycle.get(symbol, 0.0)
