@@ -116,8 +116,8 @@ canvas#equity-chart { width: 100%; display: block; }
 .log-item .lt { color: var(--muted); font-family: "SF Mono", Menlo, monospace; font-size: 12px; flex-shrink: 0; }
 .log-item .lmsg { word-break: break-all; }
 .log-item.trade { border-left-color: var(--green); }
-.log-item.trade.neg { border-left-color: var(--red); }
-.log-item.risk, .log-item.error { border-left-color: var(--red); background: var(--red-bg); }
+.log-item.trade.neg { border-left-color: var(--muted); }
+.log-item.risk, .log-item.error { border-left-color: var(--muted); background: transparent; }
 .log-item.system { border-left-color: var(--blue); }
 .log-item.tuning { border-left-color: var(--yellow); }
 .log-item.info { border-left-color: var(--muted); }
@@ -370,7 +370,7 @@ body.modal-open { overflow: hidden; }
 
 .log-term {
   position: fixed; left: 18px; bottom: 66px; z-index: 61;
-  width: min(460px, calc(100vw - 36px));
+  width: min(720px, calc(100vw - 36px));
   height: min(400px, calc(100vh - 110px));
   display: flex; flex-direction: column; overflow: hidden;
   background: #0a0c10; border: 1px solid #2a3140; border-radius: 13px;
@@ -413,7 +413,7 @@ body.modal-open { overflow: hidden; }
 }
 /* 终端内的日志列表: 填满窗口、等宽呈现 (覆盖 .log-list 默认高度) */
 .log-term .log-list {
-  max-height: none; height: 100%; overflow-y: auto;
+  max-height: none; height: 100%; overflow-y: auto; overflow-x: auto;
   display: flex; flex-direction: column; gap: 2px;
   font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5;
   padding-right: 4px;
@@ -421,14 +421,12 @@ body.modal-open { overflow: hidden; }
 .log-term .log-item {
   background: transparent; border-radius: 0; padding: 2px 0 2px 10px;
   border-left: 2px solid var(--muted); font-size: 12.5px;
+  white-space: nowrap;
 }
 .log-term .log-item .lt { color: #6f7a90; }
 .log-term .log-item .ltype { color: #6f7a90; }
 .log-term .log-item .lmsg { color: #cdd6e4; }
 .log-term .log-item.trade .lmsg { color: var(--green); }
-.log-term .log-item.trade.neg .lmsg { color: var(--red); }
-.log-term .log-item.risk .lmsg,
-.log-term .log-item.error .lmsg { color: var(--red); }
 .log-term .log-item.system .lmsg { color: var(--blue); }
 .log-term .log-item.tuning .lmsg { color: var(--yellow); }
 /* 滚动条 */
