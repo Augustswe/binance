@@ -215,6 +215,7 @@ class AccountManager:
         """聚合所有账户盈亏, 供入口页对比总览 (复用各引擎 snapshot)"""
         accs: list[dict] = []
         by_strategy: dict[str, Any] = {}
+        mode_stats_agg: dict[str, dict] = {}   # 跨账户聚合各模式统计, 供控制台「策略模式对比」
         tot = {"equity": 0.0, "day_pnl": 0.0, "realized_pnl": 0.0,
                "open_positions": 0, "accounts": 0}
         for a in self.accounts:
@@ -224,6 +225,18 @@ class AccountManager:
             except Exception:
                 s = None
             st = s["strategy_stats"] if s else {}
+            mstats = (s.get("mode_stats") or {}) if s else {}
+            # 跨账户聚合各模式实盘统计 (交易数/胜率/盈亏/手续费)
+            # 跳过 "交易所同步" 等非策略键 (同步恢复持仓的交易记录会落入该键, 不计入策略对比)
+            for mode, ms in mstats.items():
+                if mode == "交易所同步":
+                    continue
+                agg = mode_stats_agg.setdefault(mode, {
+                    "total_trades": 0, "wins": 0, "realized_pnl": 0.0, "fees_paid": 0.0})
+                agg["total_trades"] += int(ms.get("total_trades", 0) or 0)
+                agg["wins"] += int(ms.get("wins", 0) or 0)
+                agg["realized_pnl"] += float(ms.get("realized_pnl", 0.0) or 0.0)
+                agg["fees_paid"] += float(ms.get("fees_paid", 0.0) or 0.0)
             row = {
                 "name": a.spec.name,
                 "strategy": e.run_mode,
@@ -253,8 +266,22 @@ class AccountManager:
             tot["day_pnl"] += row["day_pnl"]
             tot["realized_pnl"] += row["realized_pnl"]
             tot["open_positions"] += row["open_positions"]
+        # 聚合胜率 + 资金权重 (只读计算, 不调用 learn_mode_weights 以免落盘 data/mode_weights.json)
+        mode_weights: dict[str, float] = {}
+        for mode, agg in mode_stats_agg.items():
+            agg["win_rate"] = round(agg["wins"] / agg["total_trades"] * 100, 1) if agg["total_trades"] else 0.0
+            agg["realized_pnl"] = round(agg["realized_pnl"], 2)
+            agg["fees_paid"] = round(agg["fees_paid"], 2)
+            pnl = agg["realized_pnl"]
+            if pnl > 0:
+                mode_weights[mode] = round(max(1.0, min(3.0, 1.0 + pnl / 50.0)), 2)
+            elif pnl < 0:
+                mode_weights[mode] = round(max(0.3, min(1.0, 1.0 + pnl / 50.0)), 2)
+            else:
+                mode_weights[mode] = 1.0
         tot["accounts"] = len(accs)
-        return {"accounts": accs, "by_strategy": by_strategy, "totals": tot}
+        return {"accounts": accs, "by_strategy": by_strategy, "totals": tot,
+                "mode_stats": mode_stats_agg, "mode_weights": mode_weights}
 
     # ---------------- 热绑定 / 解绑 / 启停 (入口页用, 无需重启) ----------------
     async def bind(self, spec: AccountSpec) -> Account:

@@ -39,18 +39,33 @@
     </div>
   </section>
 
-  <!-- 盈亏总览 -->
+  <!-- 盈亏总览 (按账户细分) -->
   <section class="panel entry-ov">
-    <div class="panel-title">📊 盈亏总览 <span class="hint">全部绑定账户聚合 · 每 5 秒自动刷新</span></div>
+    <div class="panel-title">📊 盈亏总览 <span class="hint">按账户细分 · 每 5 秒自动刷新</span></div>
     <div class="ov-cards" id="ov-cards"></div>
-    <div class="ov-charts">
-      <div class="ov-chart">
-        <div class="ov-chart-title">按账户 · 累计已实现盈亏</div>
-        <div id="ov-by-account" class="bars"><div class="empty">加载中…</div></div>
+
+    <div class="ov-block">
+      <div class="ov-chart-title">按账户盈亏明细</div>
+      <div class="table-wrap">
+        <table id="ov-accounts-table" class="ov-accounts-tbl">
+          <thead><tr>
+            <th>账户</th><th>策略</th><th>网络</th><th>状态</th><th>权益</th>
+            <th>今日盈亏</th><th>累计已实现</th><th>胜率</th><th>交易数</th><th>持仓数</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
-      <div class="ov-chart">
-        <div class="ov-chart-title">按策略 · 累计已实现盈亏</div>
-        <div id="ov-by-strategy" class="bars"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="ov-block">
+      <div class="ov-chart-title">🎯 策略模式对比 <span class="hint">跨账户聚合各模式实盘表现 · 看哪个策略更可靠（按已实现盈亏排序）</span></div>
+      <div class="table-wrap">
+        <table id="modes-table" class="ov-modes-tbl">
+          <thead><tr>
+            <th>模式</th><th>交易数</th><th>胜率</th><th>已实现盈亏</th><th>手续费</th><th>资金权重</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -385,21 +400,6 @@
         <thead>
           <tr>
             <th>轮次时间</th><th>最优组合</th><th>评分</th><th>第2名</th><th>第3名</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- 模式对比 -->
-  <section class="panel">
-    <div class="panel-title">🎯 策略模式对比 <span class="hint">各模式独立开仓统计 · 系统按实盘表现分配资金权重</span></div>
-    <div class="table-wrap">
-      <table id="modes-table">
-        <thead>
-          <tr>
-            <th>模式</th><th>状态</th><th>资金权重</th><th>交易数</th><th>胜率</th><th>已实现盈亏</th><th>手续费</th>
           </tr>
         </thead>
         <tbody></tbody>

@@ -183,7 +183,6 @@ async function refresh() {
   renderSymbols(s);
   renderSignals(s);
   renderTrades(s);
-  renderModes(s);
   renderLogs(s);
 
   // 风控文案: 主网模式显示主网限额, 否则显示 risk 配置
@@ -617,30 +616,29 @@ function setMsg(text, isErr = false) {
   if (el) { el.textContent = text || ""; el.style.color = isErr ? "var(--red)" : "var(--green)"; }
 }
 
-function renderModes(s) {
+function renderConsoleModes(stats, weights) {
   const tb = document.querySelector("#modes-table tbody");
   if (!tb) return;
-  const stats = s.mode_stats || {};
-  const all = Object.keys(MODE_LABELS);
-  // 用已启用的模式 + 有统计的模式合并展示
-  const shown = [...new Set([...enabledModes, ...Object.keys(stats)])].filter(m => all.includes(m));
+  const st = stats || {};
+  const w = weights || {};
+  // 仅展示有实盘统计(交易数>0)的模式; 按已实现盈亏降序, 让"更可靠/更赚"的策略排在前面
+  const shown = Object.keys(st).filter(m => MODE_LABELS[m] && (st[m].total_trades || 0) > 0);
+  shown.sort((a, b) => ((st[b].realized_pnl || 0) - (st[a].realized_pnl || 0)));
   if (!shown.length) {
-    tb.innerHTML = `<tr><td colspan="7" class="empty">暂无模式数据（系统运行后自动统计）</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="6" class="empty">暂无模式数据（系统运行后自动统计）</td></tr>`;
     return;
   }
   let html = "";
   for (const m of shown) {
-    const st = stats[m] || { total_trades: 0, wins: 0, win_rate: 0, realized_pnl: 0, fees_paid: 0 };
-    const enabled = enabledModes.includes(m);
-    const w = modeWeights[m] != null ? modeWeights[m] : 1.0;
-    html += `<tr${enabled ? "" : ' style="opacity:.45"'}>
-      <td><b>${MODE_LABELS[m] || m}</b></td>
-      <td>${enabled ? '<span class="pill pill-long">启用</span>' : '<span class="pill pill-none">停用</span>'}</td>
-      <td class="mono ${w > 1.05 ? "pos" : w < 0.95 ? "neg" : ""}">${fmt(w, 2)}x</td>
-      <td class="mono">${st.total_trades}</td>
-      <td class="mono">${fmt(st.win_rate, 1)}%</td>
-      <td class="mono ${cls(st.realized_pnl)}">${sign(st.realized_pnl)}${fmt(st.realized_pnl)} U</td>
-      <td class="mono">${fmt(st.fees_paid)} U</td>
+    const s = st[m] || { total_trades: 0, win_rate: 0, realized_pnl: 0, fees_paid: 0 };
+    const wt = w[m] != null ? w[m] : 1.0;
+    html += `<tr>
+      <td><b>${MODE_LABELS[m]}</b></td>
+      <td class="mono">${s.total_trades}</td>
+      <td class="mono">${fmt(s.win_rate, 1)}%</td>
+      <td class="mono ${cls(s.realized_pnl)}">${sign(s.realized_pnl)}${fmt(s.realized_pnl)} U</td>
+      <td class="mono">${fmt(s.fees_paid)} U</td>
+      <td class="mono ${wt > 1.05 ? "pos" : wt < 0.95 ? "neg" : ""}">${fmt(wt, 2)}x</td>
     </tr>`;
   }
   tb.innerHTML = html;
@@ -981,47 +979,36 @@ function renderEntryOverview(ov) {
     `<div class="card"><div class="label">${c.label}</div><div class="value mono ${c.cls || ""}">${c.val}</div></div>`
   ).join("");
 
-  // 按账户累计已实现盈亏 (横向条)
-  const acc = (ov.accounts) || [];
-  const ba = $("ov-by-account");
-  if (ba) {
-    if (!acc.length) ba.innerHTML = `<div class="empty">暂无账户</div>`;
-    else ba.innerHTML = renderBars(acc.map(x => ({
-      label: x.name,
-      sub: x.strategy_label,
-      val: x.realized_pnl,
-      status: accStatus(x),
-    })));
-  }
-  // 按策略累计已实现盈亏
-  const bs = (ov.by_strategy) || {};
-  const bsel = $("ov-by-strategy");
-  if (bsel) {
-    const rows = Object.keys(bs).map(k => ({
-      label: bs[k].strategy_label || k,
-      sub: (bs[k].accounts || []).join(", "),
-      val: bs[k].sum_realized,
-    }));
-    bsel.innerHTML = rows.length ? renderBars(rows) : `<div class="empty">暂无策略数据</div>`;
-  }
+  // 按账户盈亏明细表
+  renderEntryAccountsTable(ov.accounts || []);
+  // 策略模式对比表 (跨账户聚合)
+  renderConsoleModes(ov.mode_stats, ov.mode_weights);
 }
 
-function renderBars(rows) {
-  const vals = rows.map(r => r.val || 0);
-  const max = Math.max(1e-9, ...vals.map(v => Math.abs(v)));
-  return rows.map(r => {
-    const v = r.val || 0;
-    const pct = Math.min(100, Math.abs(v) / max * 100);
-    const pos = v >= 0;
-    // 国内惯例: 涨(正)红 / 跌(负)绿
-    const color = pos ? "var(--red)" : "var(--green)";
-    const side = pos ? "right" : "left";
-    return `<div class="bar-row" title="${escapeHtml(r.label)}: ${fmt(v)} U">
-      <span class="bar-label">${escapeHtml(r.label)}<span class="bar-sub">${escapeHtml(r.sub || "")}</span></span>
-      <span class="bar-track"><span class="bar-fill" style="width:${pct}%;${side === "right" ? "margin-left:auto;" : ""}background:${color}"></span></span>
-      <span class="bar-val mono ${pos ? "neg" : "pos"}">${sign(v)}${fmt(v)}</span>
-    </div>`;
-  }).join("");
+function renderEntryAccountsTable(accs) {
+  const tb = document.querySelector("#ov-accounts-table tbody");
+  if (!tb) return;
+  if (!accs || !accs.length) {
+    tb.innerHTML = `<tr><td colspan="10" class="empty">暂无账户</td></tr>`;
+    return;
+  }
+  let html = "";
+  for (const x of accs) {
+    const [stTxt, stCls] = accStatus(x);
+    html += `<tr>
+      <td><b>${escapeHtml(x.name)}</b></td>
+      <td>${escapeHtml(x.strategy_label)}</td>
+      <td>${escapeHtml(x.network)}</td>
+      <td><span class="badge ${stCls}">${stTxt}</span></td>
+      <td class="mono">${fmt(x.equity)} U</td>
+      <td class="mono ${cls(x.day_pnl)}">${sign(x.day_pnl)}${fmt(x.day_pnl)} U</td>
+      <td class="mono ${cls(x.realized_pnl)}">${sign(x.realized_pnl)}${fmt(x.realized_pnl)} U</td>
+      <td class="mono">${fmt(x.win_rate, 1)}%</td>
+      <td class="mono">${x.total_trades}</td>
+      <td class="mono">${x.open_positions}</td>
+    </tr>`;
+  }
+  tb.innerHTML = html;
 }
 
 function accStatus(x) {
