@@ -73,6 +73,10 @@ class ManualTPSLBody(BaseModel):
     sl: dict | None = None
 
 
+class ClosePositionBody(BaseModel):
+    symbol: str
+
+
 class BindBody(BaseModel):
     name: str
     network: str = "testnet"
@@ -251,6 +255,36 @@ def create_app(manager: AccountManager) -> FastAPI:
         return {"ok": True, "symbol": body.symbol,
                 "tp": pos.get("tp"), "sl": pos.get("sl"),
                 "manual_tp": pos.get("manual_tp"), "manual_sl": pos.get("manual_sl")}
+
+    # ---------------- 手动市价平仓 ----------------
+    @app.post("/api/close_position")
+    async def api_close_position(body: ClosePositionBody, request: Request):
+        """手动按当前价立即市价平仓单个持仓 (不可撤销)。
+
+        - 取当前 mark 价作为参考价; live 模式先撤掉交易所侧挂单(止盈/止损),
+          再下 reduce-only 市价单真实成交; paper 模式直接按参考价结算。
+        - 与 trader 主循环里的 _check_tp_sl 走同一条 execution.close_position 路径。
+        """
+        e = _engine(request)
+        d = e.state.data
+        sym = body.symbol
+        pos = d["positions"].get(sym)
+        if not pos:
+            return {"ok": False, "error": f"当前无 {sym} 持仓"}
+        mark = d["prices"].get(sym, 0.0)
+        try:
+            trade = await e.execution.close_position(sym, mark, "手动市价平仓")
+        except Exception as ex:
+            return {"ok": False, "error": f"平仓失败: {str(ex)[:200]}"}
+        if not trade:
+            return {"ok": False, "error": f"{sym} 平仓未成交 (可能已无持仓)"}
+        pnl = trade.get("pnl")
+        pnl_pct = trade.get("pnl_pct")
+        e.state.add_event(
+            "info",
+            f"🔒 {sym} 手动市价平仓完成: 盈亏 {pnl:.2f}U ({pnl_pct:.2f}%)" if isinstance(pnl, (int, float)) else f"🔒 {sym} 手动市价平仓完成",
+        )
+        return {"ok": True, "symbol": sym, "trade": trade}
 
     # ---------------- 设置面板 ----------------
     @app.get("/api/settings")

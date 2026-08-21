@@ -315,6 +315,8 @@ body.modal-open { overflow: hidden; }
 .tpsl-cell {
   display: flex; flex-direction: column; align-items: stretch; gap: 3px;
 }
+.tpsl-actions { display: flex; gap: 6px; }
+.tpsl-actions .tpsl-btn { flex: 1; }
 .tpsl-btn {
   display: flex; align-items: center; justify-content: center; gap: 4px;
   padding: 4px 10px; border-radius: 6px; cursor: pointer;
@@ -326,6 +328,9 @@ body.modal-open { overflow: hidden; }
 }
 .tpsl-btn:hover { border-color: var(--blue); }
 .tpsl-btn.open { color: var(--muted); border-color: var(--muted); background: transparent; }
+/* 立即平仓: 危险操作, 琥珀警示色 (与系统日志 no-red 规则区分) */
+.tpsl-btn.close-now { color: #e8a33d; border-color: #e8a33d; }
+.tpsl-btn.close-now:hover { background: #e8a33d; color: #1a1d24; border-color: #e8a33d; }
 .tpsl-cur {
   font-size: 11px; color: var(--muted); font-family: var(--mono);
   text-align: center;

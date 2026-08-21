@@ -303,9 +303,12 @@ function tpSlCell(p) {
   }
   const cur = `<span class="tpsl-cur">${autoTP} / ${autoSL}${active ? " (手动)" : ""}</span>`;
   return `<div class="tpsl-cell">
-    <button class="tpsl-btn ${open ? "open" : ""}" data-sym="${p.symbol}" title="${open ? "收起止盈止损编辑器" : "点击设置市价止盈止损 (触发即市价成交)"}">
-      ${open ? "收起 ▲" : "市价止盈止损"}
-    </button>
+    <div class="tpsl-actions">
+      <button class="tpsl-btn ${open ? "open" : ""}" data-sym="${p.symbol}" title="${open ? "收起止盈止损编辑器" : "点击设置市价止盈止损 (触发即市价成交)"}">
+        ${open ? "收起 ▲" : "市价止盈止损"}
+      </button>
+      <button class="tpsl-btn close-now" data-sym="${p.symbol}" title="按当前价立即市价平仓 (不可撤销)">立即平仓</button>
+    </div>
     ${cur}
   </div>`;
 }
@@ -408,6 +411,22 @@ async function onTpslClear(e) {
 
 function opt(sel, val, label) {
   return `<option value="${val}" ${sel === val ? "selected" : ""}>${label}</option>`;
+}
+
+async function onCloseNow(sym) {
+  if (!confirm(`确认按当前价市价平仓 ${sym}？\n此操作不可撤销 (测试网)。`)) return;
+  try {
+    const res = await fetch(apiUrl("/api/close_position"), {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({symbol: sym}),
+    });
+    const j = await res.json();
+    if (!j.ok) { alert("平仓失败: " + (j.error || "未知错误")); }
+    else { refresh(); }
+  } catch (e) {
+    alert("请求失败: " + e);
+  }
 }
 
 async function postManualTPSL(sym, tp, sl) {
@@ -826,6 +845,9 @@ function initPanel(account) {
   const symTb = document.querySelector("#symbols-table tbody");
   if (symTb) {
     symTb.addEventListener("click", (e) => {
+      // 注意: .close-now 同时带有 .tpsl-btn, 必须在 .tpsl-btn 之前判定, 否则会被误判为展开编辑器
+      const closeNow = e.target.closest(".close-now");
+      if (closeNow) { onCloseNow(closeNow.dataset.sym); return; }
       const btn = e.target.closest(".tpsl-btn");
       if (btn) { toggleTpsl(btn.dataset.sym); return; }
       const apply = e.target.closest(".tpsl-apply");
