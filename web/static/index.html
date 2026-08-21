@@ -36,6 +36,31 @@
       <button class="btn btn-ghost" id="btn-settings-close">✕</button>
     </div>
     <div class="modal-body">
+      <!-- 盈亏模块 -->
+      <div class="modal-sec pnl-sec">
+        <div class="modal-sec-title">盈亏 <span class="hint">从起始资金到现有的累计盈亏 (现有 = 现金 + 未实现)</span></div>
+        <div class="pnl-countdown">
+          <div class="cd-item">
+            <span class="cd-num mono" id="pnl-init">--</span>
+            <span class="cd-label">起始资金(U)</span>
+          </div>
+          <div class="cd-item">
+            <span class="cd-num mono" id="pnl-cur">--</span>
+            <span class="cd-label">现有资金(U)</span>
+          </div>
+          <div class="cd-item">
+            <span class="cd-num mono" id="pnl-pct">--</span>
+            <span class="cd-label">盈亏比例</span>
+          </div>
+        </div>
+        <div class="modal-row">
+          <span class="modal-label">设置起始资金</span>
+          <input type="number" id="set-pnl-init" class="input mono" min="1" step="100" placeholder="输入起始资金 (U)">
+          <button class="btn btn-ok" id="btn-save-pnl-init" type="button">保存</button>
+          <span class="hint">首次使用请录入真实起始资金, 盈亏比例据此计算</span>
+        </div>
+      </div>
+      <hr class="modal-hr">
       <!-- 交易网络切换 -->
       <div class="modal-sec net-sec">
         <div class="modal-sec-title">交易网络 <span class="hint">热切换无需重启 · 主网 = 真实资金</span></div>

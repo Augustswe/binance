@@ -60,6 +60,7 @@ class TradingState:
                 "fees_paid": 0.0,
             },
             "mode_stats": {},             # 按策略模式统计: mode -> {trades/wins/pnl/fees}
+            "initial_capital": 0.0,       # 起始资金 (用户在设置中填, 用于盈亏模块; 0 表示未设置)
         }
         self._load()
 
@@ -72,7 +73,7 @@ class TradingState:
                 for k in ("positions", "trades", "orders", "equity_history", "balance_cash",
                           "day_start_equity", "day_date", "day_start_initialized",
                           "strategy_stats", "mode_stats", "last_close_time", "events",
-                          "mainnet_baseline"):
+                          "mainnet_baseline", "initial_capital"):
                     if k in saved:
                         self.data[k] = saved[k]
                 # 同一天重启: 保留今日起始权益 (今日盈亏跨重启连续, 不归零)
@@ -181,6 +182,16 @@ class TradingState:
             self.data["balance_cash"] = float(wallet_balance)
             for p in self.data["positions"].values():
                 p["upnl"] = unrealized  # 整体未实现, 简化处理
+
+    def set_initial_capital(self, value: float) -> None:
+        """设置起始资金 (用户通过设置面板录入, 用于盈亏模块计算盈亏比例)"""
+        v = float(value)
+        if v <= 0:
+            raise ValueError(f"起始资金必须大于 0, 当前 {v}")
+        with self.lock:
+            self.data["initial_capital"] = round(v, 2)
+        self.save()
+        self.log.info("起始资金已更新: %.2f", v)
 
     # ---------------- 持仓 ----------------
     def open_position(self, symbol: str, side: str, qty: float, entry: float,

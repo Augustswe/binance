@@ -52,6 +52,10 @@ class AutostartBody(BaseModel):
     enabled: bool = False
 
 
+class InitialCapitalBody(BaseModel):
+    value: float = 0.0
+
+
 class ManualTPSLBody(BaseModel):
     symbol: str
     tp: dict | None = None   # {"type":"price"|"pct","value":<number>} 或 None=清除
@@ -240,6 +244,22 @@ def create_app(engine) -> FastAPI:
             ),
             "mainnet": engine.mainnet_cap_info(),   # 解锁倒计时/档位/限额/警告
             "autostart": autostart_status(),        # 开机自启状态 (macOS launchd)
+            "initial_capital": float(engine.state.data.get("initial_capital", 0.0)),
+            "equity": engine.state.equity(),
+        }
+
+    @app.post("/api/settings/initial_capital")
+    async def api_settings_initial_capital(body: InitialCapitalBody):
+        """设置起始资金 (盈亏模块): 持久化到 state.json, 即时生效"""
+        try:
+            engine.state.set_initial_capital(body.value)
+        except ValueError as e:
+            return {"ok": False, "msg": str(e)}
+        return {
+            "ok": True,
+            "initial_capital": engine.state.data.get("initial_capital", 0.0),
+            "equity": engine.state.equity(),
+            "msg": f"✅ 起始资金已设为 {body.value:.2f} U",
         }
 
     @app.post("/api/settings/modes")

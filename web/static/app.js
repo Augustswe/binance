@@ -774,6 +774,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderSymbolList();
       renderRiskSettings();
       renderNetworkSettings();
+      renderPnl();
       renderAutostart();
     } catch (e) {
       setMsg("❌ 加载设置失败: " + e, true);
@@ -1018,8 +1019,59 @@ function renderModeSettings() {
         cd.classList.remove("cd-locked");
       }
       $("cd-tier").textContent = m.tier || "--";
-    } else if (cd) {
-      cd.style.display = "none";
+} else if (cd) {
+        cd.style.display = "none";
+      }
+  }
+
+  // ---------------- 盈亏模块 (起始资金 / 现有 / 盈亏比例) ----------------
+  function renderPnl() {
+    const init = Number(settingsData.initial_capital || 0);
+    const cur = Number(settingsData.equity || 0);
+    const initEl = $("pnl-init");
+    const curEl = $("pnl-cur");
+    const pctEl = $("pnl-pct");
+    const pctCard = pctEl && pctEl.parentElement;
+    if (initEl) initEl.textContent = init > 0 ? fmt(init) + " U" : "--";
+    if (curEl) curEl.textContent = fmt(cur) + " U";
+    if (pctEl) {
+      pctEl.textContent = "--";
+      if (pctCard) pctCard.classList.remove("pnl-gain", "pnl-loss", "pnl-flat");
+      if (init > 0) {
+        const pnl = cur - init;
+        const pct = (pnl / init) * 100;
+        const sign = pnl > 0 ? "+" : "";
+        pctEl.textContent = `${sign}${pct.toFixed(2)}%`;
+        if (pctCard) {
+          pctCard.classList.add(pnl > 0 ? "pnl-gain" : (pnl < 0 ? "pnl-loss" : "pnl-flat"));
+        }
+      }
+    }
+    const inp = $("set-pnl-init");
+    if (inp && init > 0) inp.value = init;
+  }
+
+  async function savePnlInit() {
+    const inp = $("set-pnl-init");
+    const v = parseFloat(inp.value);
+    if (!v || v <= 0) {
+      setMsg("❌ 请输入大于 0 的起始资金", true);
+      return;
+    }
+    try {
+      const res = await fetch("/api/settings/initial_capital", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: v }),
+      });
+      const data = await res.json();
+      if (!data.ok) { setMsg("❌ " + (data.msg || "保存失败"), true); return; }
+      settingsData.initial_capital = data.initial_capital;
+      settingsData.equity = data.equity;
+      renderPnl();
+      setMsg(data.msg || "✅ 起始资金已保存");
+    } catch (e) {
+      setMsg("❌ 保存失败: " + e, true);
     }
   }
 
@@ -1150,6 +1202,8 @@ function renderModeSettings() {
       renderAutostart();
     }
   });
+
+  $("btn-save-pnl-init").addEventListener("click", savePnlInit);
 
   window.addEventListener("resize", () => {
     if (lastSnapshot) drawChart(lastSnapshot.equity_history, lastSnapshot.day_start_equity);
