@@ -678,9 +678,11 @@ class TradingEngine:
             return False
         excess = exp - cap
         pct_cap = eq * pct / 100.0 if pct > 0 else 0.0
+        binding_desc = (f"百分比 权益{int(pct)}%≈{pct_cap:.0f}U"
+                        if pct > 0 else f"固定值 {max_total:.0f}U")
         self.log.warning(
-            "敞口超限兜底触发: exposure=%.1f > cap=%.1f (总持仓上限%.0f / 权益%d%%≈%.0f), 超出 %.1fU, 动作=%s",
-            exp, cap, max_total, int(pct), pct_cap, excess, action,
+            "敞口超限兜底触发: exposure=%.1f > 上限%.1f (绑定上限: %s; 固定上限%.0fU 仅兜底), 超出 %.1fU, 动作=%s",
+            exp, cap, binding_desc, max_total, excess, action,
         )
         if action == "halt":
             self.state.halt(

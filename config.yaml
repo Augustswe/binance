@@ -77,12 +77,12 @@ leverage:
 # 风控 (激进模式)
 risk:
   max_single_order_notional: 1000
-  max_total_position_notional: 2000
+  max_total_position_notional: 2000   # 仅作兜底/主网t3默认上限; 百分比(max_total_exposure_pct)开启时此固定值不再约束敞口
   margin_per_position: 200
   daily_loss_stop: 0.3
   max_positions: 5
   cooldown_minutes: 5
-  max_total_exposure_pct: 60
+  max_total_exposure_pct: 40
   # 敞口上限兜底 (解决"敞口锁不住"): 对从历史/外部/重启同步继承来的超限持仓的处理
   #   reduce = 自动减仓至上限内 (真正锁住敞口, 优先平名义价值最大的持仓)
   #   halt   = 熔断停机 + 通知, 不平仓, 待人工处理
