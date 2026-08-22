@@ -13,6 +13,7 @@ from core.notify import Notifier
 from core.orders import rebuild_from_user_trades
 from core.risk import RiskManager
 from core.state import TradingState
+from core.guards import VolatilityHalt, WickFilter, GapProtector, OIMonitor
 from core.tuner import run_tuning, save_tuned_params
 from strategies.donchian import DonchianEngine
 from strategies.engine import StrategyEngine
@@ -57,6 +58,12 @@ class TradingEngine:
         self.exchange = BinanceFutures(cfg)
         self.risk = RiskManager(cfg)
         self.strategy_engine = StrategyEngine(cfg)
+        # 盘中防护 (对抗控盘插针 / 闪崩连环爆仓): 四道防线
+        self.vol_guard = VolatilityHalt(cfg)
+        self.wick_filter = WickFilter(cfg)
+        self.gap_protect = GapProtector(cfg)
+        self.oi_monitor = OIMonitor(cfg)
+        self._last_oi_ts = 0.0
         # 策略模式: 支持多模式并行 (donchian/multi/grid/ma_cross/rsi/bollinger)
         self.strategy_mode = cfg.get("strategy_mode", "multi")
         from strategies.modes import ModeManager
@@ -150,6 +157,13 @@ class TradingEngine:
             self._verify_api()
             await asyncio.to_thread(self._sync_live_positions)
             await asyncio.to_thread(self._backfill_orders_from_exchange)
+        # 复位盘中防护标志 (ephemeral, 重启自然清零, 避免上一轮熔断状态残留)
+        d = self.state.data
+        d["vol_halt"] = False
+        d["vol_halt_reason"] = None
+        d["oi_alert"] = False
+        d["oi_alert_suppress"] = False
+        d["oi_alert_reason"] = None
         self._task = asyncio.create_task(self._loop())
         self.log.info("交易引擎启动: 模式=%s 周期=%s 交易对=%s",
                       self.cfg["mode"], self.timeframe, self.symbols)
@@ -542,6 +556,87 @@ class TradingEngine:
         )
         return {"ok": True, "msg": f"✅ 已切换至 {label}", "network": network}
 
+    # ---------------- 盘中防护: 波动率熔断 / OI 监控 / 止损影线确认 ----------------
+    def _update_vol_halt(self, now: float) -> None:
+        """用最新价更新波动率熔断缓冲, 结果写回 state (供 check_open 拦截开仓)。"""
+        self.vol_guard.update(self.state.data["prices"], now)
+        halted, reason = self.vol_guard.evaluate()
+        d = self.state.data
+        if halted and not d["vol_halt"]:
+            self.log.warning("盘中波动率熔断触发: %s", reason)
+            self.state.add_event("risk", f"⏸ 盘中波动率熔断: {reason} (暂停开仓)")
+        elif not halted and d["vol_halt"]:
+            self.log.info("盘中波动率熔断解除: %s", reason)
+            self.state.add_event("info", "▶️ 盘中波动率熔断解除, 恢复开仓")
+        d["vol_halt"] = halted
+        d["vol_halt_reason"] = reason
+
+    async def _update_oi_monitor(self) -> None:
+        """节流拉取 funding / OI / 多空比, 任一币异常即置 alert。
+
+        action=suppress_open 时令 check_open 暂停开仓; action=warn 仅预警不拦。
+        所有外部调用均 try/except 包裹, 异常不影响主循环心跳。
+        """
+        if not self.oi_monitor.enabled:
+            d = self.state.data
+            d["oi_alert"] = False
+            d["oi_alert_suppress"] = False
+            d["oi_alert_reason"] = None
+            return
+        now = time.time()
+        if now - self._last_oi_ts < self.oi_monitor.interval:
+            return
+        self._last_oi_ts = now
+        d = self.state.data
+        any_alert = False
+        reasons: list[str] = []
+        for sym in self.symbols:
+            try:
+                funding = self.exchange.get_funding_rate(sym)
+                oi = self.exchange.get_open_interest(sym)
+                lsr = self.exchange.get_long_short_ratio(sym)
+            except Exception as e:
+                self.log.warning("[%s] OI 监控拉取失败: %s", sym, e)
+                continue
+            prev = self.oi_monitor.oi_prev.get(sym)
+            alert, reason = self.oi_monitor.check_anomaly(
+                funding, oi, prev[1] if prev else None, lsr
+            )
+            self.oi_monitor.oi_prev[sym] = (now, oi)
+            if alert:
+                any_alert = True
+                reasons.append(f"{sym}: {reason}")
+        d["oi_alert"] = any_alert
+        d["oi_alert_suppress"] = any_alert and self.oi_monitor.action == "suppress_open"
+        if any_alert:
+            d["oi_alert_reason"] = " | ".join(reasons)
+            self.log.warning("OI/资金费率异常: %s", d["oi_alert_reason"])
+            self.state.add_event(
+                "risk",
+                f"⚠️ OI/资金费率异常{'，暂停开仓' if d['oi_alert_suppress'] else '，预警'}: "
+                f"{d['oi_alert_reason']}",
+            )
+        else:
+            d["oi_alert_reason"] = None
+
+    async def _sl_wick_blocks(self, sym: str, side: str, sl: float, mark: float) -> bool:
+        """止损影线确认: 若当前 K 线只是「插针扫过」SL 又收回(长影线), 返回 True(阻止止损)。
+
+        仅在 wick_filter.confirm_on_close 开启时生效; 取不到行情时保守放行(不拦截止损)。
+        """
+        if not self.wick_filter.confirm_on_close:
+            return False
+        try:
+            kl = await asyncio.to_thread(self.exchange.get_klines, sym, "1m", 1)
+        except Exception:
+            return False
+        if not kl:
+            return False
+        k = kl[-1]
+        if side == "LONG":
+            return (float(k["low"]) < sl) and (mark > sl)
+        return (float(k["high"]) > sl) and (mark < sl)
+
     # ---------------- 主循环 ----------------
     async def _loop(self):
         while not self._stop.is_set():
@@ -582,6 +677,11 @@ class TradingEngine:
                 self.log.warning("24小时行情获取失败: %s", e)
         d["prices"] = {s: prices.get(s, d["prices"].get(s, 0.0)) for s in self.symbols}
         d["mark_prices"] = {s: mark.get(s, d["prices"].get(s, 0.0)) for s in self.symbols}
+
+        # 1.6) 盘中波动率突变熔断: 用本轮最新价更新各币近期缓冲, 评估是否暂停开仓
+        self._update_vol_halt(now)
+        # 1.7) 资金费率 / OI / 多空比监控 (节流拉取, 捕捉控盘与连环爆仓前兆)
+        await self._update_oi_monitor()
 
         # 1.5) live 模式: 从交易所同步余额与持仓
         if self.cfg["mode"] == "live":
@@ -759,6 +859,18 @@ class TradingEngine:
             p = d["mark_prices"].get(sym)
             if not p or p <= 0:
                 continue
+            # 跳空穿仓硬止损 (最高优先级): 单笔浮亏超保证金上限, 无条件市价减仓。
+            # 这是 ATR 软止损之外的硬兜底 —— 跳空跳过止损 / 行情断流时也能封住亏损。
+            if self.gap_protect.should_hard_stop(
+                pos.get("upnl", 0.0), pos.get("notional", 0.0), pos.get("leverage", 1)
+            ):
+                reason = f"跳空穿仓硬止损(浮亏超保证金上限) @{p:.2f}"
+                self.log.warning("[%s] %s", sym, reason)
+                self.state.add_event("risk", f"🛡 {sym} {reason}")
+                trade = await self.execution.close_position(sym, p, reason)
+                if trade:
+                    await self._notify_close(trade)
+                continue
             # ---- 手动止盈止损: 优先覆盖自动 ATR, 清空后回退自动 ----
             manual_tp = pos.get("manual_tp")
             manual_sl = pos.get("manual_sl")
@@ -807,11 +919,16 @@ class TradingEngine:
                     if trade:
                         await self._notify_close(trade)
                 elif pos.get("sl") and p <= pos["sl"]:
-                    self._log_exit_trigger(sym, pos, "LONG", "sl", p, pos["sl"], trailing)
-                    reason = ("手动止损SL" if pos.get("manual_sl_active") else ("移动止损SL" if trailing else "固定止损SL")) + f" @{p:.2f}"
-                    trade = await self.execution.close_position(sym, p, reason)
-                    if trade:
-                        await self._notify_close(trade)
+                    # 影线确认: 长下影「扫过」SL 又收回 -> 不扫损, 等收盘确认才认损 (防控盘插针)
+                    if await self._sl_wick_blocks(sym, "LONG", pos["sl"], p):
+                        self.log.info("[%s] 止损被长影线拦截(收盘确认): SL=%.2f 标记=%.2f", sym, pos["sl"], p)
+                        self.state.add_event("info", f"🎯 {sym} 止损影线拦截(待收盘确认) SL={pos['sl']:.2f}")
+                    else:
+                        self._log_exit_trigger(sym, pos, "LONG", "sl", p, pos["sl"], trailing)
+                        reason = ("手动止损SL" if pos.get("manual_sl_active") else ("移动止损SL" if trailing else "固定止损SL")) + f" @{p:.2f}"
+                        trade = await self.execution.close_position(sym, p, reason)
+                        if trade:
+                            await self._notify_close(trade)
             else:
                 if pos.get("tp") and p <= pos["tp"]:
                     self._log_exit_trigger(sym, pos, "SHORT", "tp", p, pos["tp"], trailing)
@@ -820,11 +937,16 @@ class TradingEngine:
                     if trade:
                         await self._notify_close(trade)
                 elif pos.get("sl") and p >= pos["sl"]:
-                    self._log_exit_trigger(sym, pos, "SHORT", "sl", p, pos["sl"], trailing)
-                    reason = ("手动止损SL" if pos.get("manual_sl_active") else ("移动止损SL" if trailing else "固定止损SL")) + f" @{p:.2f}"
-                    trade = await self.execution.close_position(sym, p, reason)
-                    if trade:
-                        await self._notify_close(trade)
+                    # 影线确认: 长上影「扫过」SL 又收回 -> 不扫损, 等收盘确认才认损
+                    if await self._sl_wick_blocks(sym, "SHORT", pos["sl"], p):
+                        self.log.info("[%s] 止损被长影线拦截(收盘确认): SL=%.2f 标记=%.2f", sym, pos["sl"], p)
+                        self.state.add_event("info", f"🎯 {sym} 止损影线拦截(待收盘确认) SL={pos['sl']:.2f}")
+                    else:
+                        self._log_exit_trigger(sym, pos, "SHORT", "sl", p, pos["sl"], trailing)
+                        reason = ("手动止损SL" if pos.get("manual_sl_active") else ("移动止损SL" if trailing else "固定止损SL")) + f" @{p:.2f}"
+                        trade = await self.execution.close_position(sym, p, reason)
+                        if trade:
+                            await self._notify_close(trade)
 
     async def _update_trailing_stop(self, sym: str, pos: dict, price: float, atr: float) -> None:
         """移动止损: 价格创新高/新低时, 把止损线跟上去, 锁住浮盈
@@ -1020,9 +1142,15 @@ class TradingEngine:
                     self.state.add_event("ml", f"🚪 门禁拦截 {symbol} {sig.action} prob={prob:.2f}")
                     continue
             if not pos:
-                # 无持仓: 累积或开仓
                 if sig.action:
-                    if self.run_mode == "multi":
+                    # 插针/影线过滤: 触发行长影线(控盘插针)不追开仓
+                    if self.wick_filter.entry_blocked_by_wick(klines[-1]):
+                        self.log.info("🚫 插针过滤 %s %s: 长影线(影线占比超阈值), 跳过开仓", symbol, sig.action)
+                        self.state.add_event(
+                            "risk",
+                            f"🚫 插针过滤 {symbol} {sig.action} 长影线, 跳过开仓",
+                        )
+                    elif self.run_mode == "multi":
                         # 多策略 = 先收集所有具体策略的触发信号, 循环后挑评分最高者 (本笔主导策略)
                         multi_candidates.append((mode, sig))
                     else:

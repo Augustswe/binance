@@ -39,6 +39,12 @@ class TradingState:
             "paused": False,
             "halted": False,
             "halt_reason": None,
+            # 盘中防护标志 (ephemeral, 每轮由 engine 计算; 重启自然复位)
+            "vol_halt": False,             # 盘中波动率熔断: 暂停开仓
+            "vol_halt_reason": None,
+            "oi_alert": False,             # OI/资金费率异常 (仅预警或避让)
+            "oi_alert_suppress": False,    # OI 异常且 action=suppress_open -> 暂停开仓
+            "oi_alert_reason": None,
             "balance_cash": initial,          # paper: 可用现金; live: 钱包余额
             "day_start_equity": initial,
             "day_start_initialized": False,   # 首次读到真实权益后置 True
@@ -354,6 +360,11 @@ class TradingState:
                 "paused": d["paused"],
                 "halted": d["halted"],
                 "halt_reason": d["halt_reason"],
+                "vol_halt": d["vol_halt"],
+                "vol_halt_reason": d.get("vol_halt_reason"),
+                "oi_alert": d["oi_alert"],
+                "oi_alert_suppress": d["oi_alert_suppress"],
+                "oi_alert_reason": d.get("oi_alert_reason"),
                 "equity": round(equity, 2),
                 "balance_cash": round(d["balance_cash"], 2),
                 "unrealized": round(equity - d["balance_cash"], 2),

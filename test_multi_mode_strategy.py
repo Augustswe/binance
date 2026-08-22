@@ -9,9 +9,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(".").resolve()))
 
 from engine.trader import TradingEngine
+from core.guards import WickFilter, GapProtector, VolatilityHalt, OIMonitor
 from unittest.mock import AsyncMock
 
-FAKE_KLINES = [[0, 0, 0, 0, 0, 0] for _ in range(50)]
+FAKE_KLINES = [
+    {"open_time": 0, "open": 0, "high": 0, "low": 0, "close": 0, "volume": 0, "close_time": 0}
+    for _ in range(50)
+]
 
 
 class FakeSig:
@@ -43,7 +47,13 @@ def build_engine(run_mode, signals_by_mode):
     eng.donchian = None
     eng.ml_threshold = 0.5
     eng._ml_regime = {}
+    eng.allow_short = True
     eng.cfg = {"signal": {"close_threshold": 0.0}, "risk": {}}
+    # 盘中防护对象 (绕过 __init__ 时需手动补齐; 默认配置下 FAKE_KLINES 全零 -> 不拦截)
+    eng.wick_filter = WickFilter(eng.cfg)
+    eng.gap_protect = GapProtector(eng.cfg)
+    eng.vol_guard = VolatilityHalt(eng.cfg)
+    eng.oi_monitor = OIMonitor(eng.cfg)
     eng.exchange = types.SimpleNamespace(
         get_klines=lambda *a, **k: FAKE_KLINES
     )

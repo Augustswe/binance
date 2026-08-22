@@ -29,6 +29,12 @@ class RiskManager:
             return False, "系统已暂停"
         if d["halted"]:
             return False, f"熔断中: {d['halt_reason']}"
+        # 盘中波动率突变熔断: 近窗口内标的大幅 swing, 暂停开仓 (不拦平仓/减仓)
+        if d.get("vol_halt"):
+            return False, f"盘中波动率熔断: {d.get('vol_halt_reason') or ''}"
+        # 资金费率/OI 异常避让: OI 监控触发且 action=suppress_open 时暂停开仓
+        if d.get("oi_alert_suppress"):
+            return False, f"OI/资金费率异常避让: {d.get('oi_alert_reason') or ''}"
         if notional <= 0:
             return False, "名义价值<=0"
         if notional > self.risk["max_single_order_notional"]:

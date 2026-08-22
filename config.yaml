@@ -89,6 +89,35 @@ risk:
   #   off    = 不处理 (仅拦新开仓, 维持原行为; 继承来的超限持仓将一直保留)
   enforce_exposure_cap: "reduce"
 
+# 盘中防护 (对抗「控盘插针」「闪崩连环爆仓」的四道防线)
+# 详见 README「🛡️ 风控与敞口」→ L4 盘中防护
+guards:
+  # 1) 盘中波动率突变熔断: 近 lookback_seconds 内某币 振幅(峰-谷)/峰 > drawdown_pct 即暂停开仓
+  #    (日亏熔断按「当日权益」算, 带杠杆遇闪崩可能未到阈值已穿仓; 此熔断按「行情」急刹)
+  intrabar_halt:
+    enabled: true
+    lookback_seconds: 300      # 观察窗口 5 分钟
+    drawdown_pct: 6            # 窗口内振幅 > 6% 暂停开仓
+    resume_pct: 3              # 振幅回落到 3% 以下才恢复开仓 (迟滞, 防抖动)
+  # 2) 插针/影线过滤: 长影线(控盘插针)不追开仓; 止损需当前K线收盘确认, 防长影线扫损
+  wick_filter:
+    enabled: true
+    max_wick_ratio: 0.7        # (range-body)/range > 0.7 视为长影线
+    confirm_on_close: true     # 止损需收盘价确认(长下/上影回拉不扫损)
+  # 3) 跳空穿仓保护: 单笔浮亏超过「保证金」的 max_single_loss_pct% 即市价减仓
+  #    (ATR 软止损之外的硬兜底; 基准用保证金=亏损占保证金比例=价格跌幅×杠杆, 天然位于 ATR 止损之上)
+  gap_protect:
+    enabled: true
+    max_single_loss_pct: 40    # 单笔浮亏超保证金 40% 立即市价减仓
+  # 4) 资金费率/OI/多空比监控: 捕捉控盘与连环爆仓前兆 (费率飙/OI 暴增), 触发避让
+  oi_monitor:
+    enabled: true
+    funding_alert: 0.001       # |资金费率| > 0.1% 视为单边过热
+    oi_spike_pct: 30           # OI 较基准上涨 > 30% 视为杠杆堆砌
+    lookback_seconds: 300     # OI 增速观察窗口
+    interval_seconds: 60       # 拉取频率 (节流, 避免刷接口)
+    action: suppress_open      # suppress_open=暂停开仓 / warn=仅预警不拦
+
 # 策略参数 (引擎会按市场状态自动分配权重, 可在此开关)
 strategies:
   grid:

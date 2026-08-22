@@ -184,6 +184,25 @@ class BinanceFutures:
         data = self._public("GET", "/fapi/v1/premiumIndex")
         return {d["symbol"]: float(d["markPrice"]) for d in data}
 
+    # ---------------- 控盘 / 爆仓前兆监控 (公开行情) ----------------
+    def get_funding_rate(self, symbol: str) -> float:
+        """最新资金费率 (lastFundingRate); 过热通常预示多/空单边拥挤。"""
+        d = self._public("GET", "/fapi/v1/premiumIndex", symbol=symbol)
+        return float(d.get("lastFundingRate", 0.0))
+
+    def get_open_interest(self, symbol: str) -> float:
+        """当前未平仓合约名义数量 (openInterest); 暴增 = 杠杆堆砌。"""
+        d = self._public("GET", "/fapi/v1/openInterest", symbol=symbol)
+        return float(d.get("openInterest", 0.0))
+
+    def get_long_short_ratio(self, symbol: str, period: str = "5m", limit: int = 1) -> float:
+        """账户多空比 (longShortRatio); 极端值预示单边情绪。公开接口, 无需签名。"""
+        data = self._public("GET", "/futures/data/globalLongShortAccountRatio",
+                            symbol=symbol, period=period, limit=limit)
+        if data:
+            return float(data[-1].get("longShortRatio", 0.0))
+        return 0.0
+
     def get_exchange_info(self) -> dict[str, Any]:
         if self._info_cache is None:
             self._info_cache = self._public("GET", "/fapi/v1/exchangeInfo")
