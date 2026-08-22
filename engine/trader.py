@@ -1160,7 +1160,7 @@ class TradingEngine:
                 pos["leverage"] = lev
                 pos["upnl"] = upnl
                 continue
-            # 交易所有多、本地没有 (外部开仓/重启) → 补录 (不产生假成交记录, 由交易所回填负责)
+            # 交易所有多、本地没有 (外部开仓/重启) → 补录持仓(不产生假成交流水; 真实原因由交易所同步阶段以「外部开仓」标记)
             self.state.open_position(
                 sym, side, qty, entry, lev, qty * entry, upnl, 0.0, 0.0, 0.0, "交易所同步",
                 record=False,
@@ -1174,46 +1174,75 @@ class TradingEngine:
                 self.state.close_position(sym, mark or self.state.data["prices"].get(sym, 0.0), "外部平仓", record=False)
 
     def _backfill_orders_from_exchange(self):
-        """启动时从交易所 userTrades 回填权威成交记录 (下单/卖出流水 + 平仓明细 + 统计)"""
+        """启动时从交易所 userTrades 同步成交记录。
+
+        设计原则: 本地引擎自己记录的订单/平仓(带真实原因: 止损/止盈/信号/熔断/只做多平空...)
+        是『原因的权威来源』, 交易所数据只负责补全 fees/pnl, 并补录引擎离线期产生的外部成交。
+        绝不把真实原因覆盖成笼统标签 —— 因此重启后仍能查到每笔的原始原因。
+        """
         try:
-            orders, trades, stats = rebuild_from_user_trades(self.exchange, self.symbols)
+            orders, trades, _stats = rebuild_from_user_trades(self.exchange, self.symbols)
         except Exception as e:
-            self.log.error("回填成交记录失败: %s", e)
+            self.log.error("同步成交记录失败: %s", e)
             return
-        if not orders:
-            self.log.info("交易所暂无成交记录可回填")
+        if not orders and not trades:
+            self.log.info("交易所暂无成交记录可同步")
             return
-        # 保留系统运行期间已经记录的本地订单, 与交易所权威记录合并去重
+
+        # ---- 成交流水(orders): 本地优先, 原因不可被覆盖 ----
         local_orders = [o for o in self.state.data.get("orders", []) if o.get("action") in ("OPEN", "CLOSE")]
         merged: dict[tuple, dict] = {}
-        for o in orders:
+        for o in local_orders:                       # 1) 先放本地(真实原因), 作为权威
             merged[self._order_key(o)] = dict(o)
-        for o in local_orders:
+        for o in orders:                             # 2) 交易所: 已存在仅补全 fees/pnl; 不存在才补录(外部成交)
             key = self._order_key(o)
             if key in merged:
-                # 本地保留策略/原因, 手续费与盈亏以交易所为准
-                for f in ("strategy", "reason"):
-                    if o.get(f):
-                        merged[key][f] = o[f]
-                if merged[key].get("fees") is None and o.get("fees") is not None:
-                    merged[key]["fees"] = o["fees"]
-                if merged[key].get("pnl") is None and o.get("pnl") is not None:
-                    merged[key]["pnl"] = o["pnl"]
+                m = merged[key]
+                if m.get("fees") is None and o.get("fees") is not None:
+                    m["fees"] = o["fees"]
+                if m.get("pnl") is None and o.get("pnl") is not None:
+                    m["pnl"] = o["pnl"]
             else:
-                merged[key] = dict(o)
+                ext = dict(o)
+                ext["reason"] = "外部开仓" if ext.get("action") == "OPEN" else "外部平仓"
+                merged[key] = ext
         merged_orders = sorted(merged.values(), key=lambda o: o["ts"])
         self.state.data["orders"] = merged_orders[-500:]
-        # 平仓明细与统计用交易所权威值 (覆盖本地估算)
-        if trades:
-            self.state.data["trades"] = trades[-200:]
-            self.state.data["strategy_stats"] = stats
+
+        # ---- 平仓明细(trades): 本地优先, 原因保留; 重新统计与合并明细一致 ----
+        local_trades = list(self.state.data.get("trades", []))
+        merged_t: dict[tuple, dict] = {}
+        for t in local_trades:
+            merged_t[self._trade_key(t)] = dict(t)
+        for t in trades:
+            key = self._trade_key(t)
+            if key not in merged_t:
+                ext = dict(t)
+                ext["reason"] = "外部平仓"
+                merged_t[key] = ext
+        merged_trades = sorted(merged_t.values(), key=lambda t: t["ts"])
+        self.state.data["trades"] = merged_trades[-200:]
+        st = self.state.data["strategy_stats"]
+        st["total_trades"] = len(merged_trades)
+        st["wins"] = sum(1 for t in merged_trades if (t.get("pnl") or 0) > 0)
+        st["realized_pnl"] = round(sum(t.get("pnl") or 0 for t in merged_trades), 4)
+        st["fees_paid"] = round(sum(t.get("fees") or 0 for t in merged_trades), 4)
+
+        # 历史遗留(旧版本写死的"交易所回填")与缺失原因, 统一改为诚实的外部成交标记;
+        # 引擎自己记录的真实原因(止损/止盈/信号/熔断...)不受此影响, 已在上面保留
+        for o in merged_orders:
+            if not o.get("reason") or o.get("reason") == "交易所回填":
+                o["reason"] = "外部开仓" if o.get("action") == "OPEN" else "外部平仓"
+        for t in merged_trades:
+            if not t.get("reason") or t.get("reason") == "交易所回填":
+                t["reason"] = "外部平仓"
+
         self.state.save()
-        self.log.info("已从交易所回填成交记录: %d 笔 (下单/卖出), %d 笔平仓, 已实现 %.2fU, 手续费 %.2fU",
-                      len(merged_orders), len(trades), stats["realized_pnl"], stats["fees_paid"])
+        self.log.info("已从交易所同步成交记录: %d 笔流水, %d 笔平仓明细 (本地真实原因已保留)", len(merged_orders), len(merged_trades))
         self.state.add_event(
             "info",
-            f"📊 已从交易所回填成交记录: 流水 {len(merged_orders)} 笔 | 平仓 {len(trades)} 笔 | "
-            f"已实现 {stats['realized_pnl']:+.2f}U | 手续费 {stats['fees_paid']:.2f}U",
+            f"📊 已从交易所同步成交记录: 流水 {len(merged_orders)} 笔 | 平仓明细 {len(merged_trades)} 笔 "
+            f"(引擎离线期补录为「外部开仓/外部平仓」, 本地方略原因保持不变)",
         )
 
     @staticmethod
@@ -1226,6 +1255,17 @@ class TradingEngine:
             o.get("side"),
             round(float(o.get("qty", 0)), 8),
             round(float(o.get("price", 0)), 6),
+        )
+
+    @staticmethod
+    def _trade_key(t: dict) -> tuple:
+        """平仓明细去重键: 时间窗口 + 币种 + 方向 + 数量 + 平仓价"""
+        return (
+            int(t.get("ts", 0) // 60),
+            t.get("symbol"),
+            t.get("side"),
+            round(float(t.get("qty", 0)), 8),
+            round(float(t.get("exit", 0)), 6),
         )
 
     def _sync_live_positions(self):

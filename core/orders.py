@@ -71,12 +71,12 @@ def rebuild_from_user_trades(exchange, symbols, limit: int = 500):
             result.append({
                 "ts": g["ts"], "symbol": g["symbol"], "action": "CLOSE", "side": side,
                 "qty": g["qty"], "price": avg_price, "fees": g["fees"], "pnl": g["pnl"],
-                "pnl_pct": None, "reason": "交易所回填", "strategy": "交易所",
+                "pnl_pct": None, "reason": None, "strategy": None,
             })
             trades.append({
                 "ts": g["ts"], "symbol": g["symbol"], "side": side, "qty": g["qty"],
                 "entry": None, "exit": avg_price, "leverage": 1, "pnl": g["pnl"],
-                "pnl_pct": None, "fees": g["fees"], "reason": "交易所回填", "strategy": "交易所",
+                "pnl_pct": None, "fees": g["fees"], "reason": None, "strategy": None,
             })
         else:
             # 下单(开仓): BUY开多 / SELL开空
@@ -84,7 +84,7 @@ def rebuild_from_user_trades(exchange, symbols, limit: int = 500):
             result.append({
                 "ts": g["ts"], "symbol": g["symbol"], "action": "OPEN", "side": side,
                 "qty": g["qty"], "price": avg_price, "fees": g["fees"], "pnl": None,
-                "pnl_pct": None, "reason": "交易所回填", "strategy": "交易所",
+                "pnl_pct": None, "reason": None, "strategy": None,
             })
 
     result.sort(key=lambda o: o["ts"])

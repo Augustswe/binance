@@ -92,6 +92,12 @@ th, td { padding: 9px 10px; text-align: right; white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 th { color: var(--muted); font-size: 12px; font-weight: 500; border-bottom: 1px solid var(--border); }
 td { border-bottom: 1px solid rgba(38,45,58,.5); font-size: 13px; }
+/* 成交记录表头固定: 滚动时表头钉在容器顶部, 不透明背景遮住下方行 */
+#trades-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--panel);
+  box-shadow: 0 1px 0 var(--border);
+}
 tr:hover td { background: rgba(255,255,255,.02); }
 .pill {
   display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 12px; font-weight: 600;

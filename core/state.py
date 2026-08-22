@@ -230,7 +230,7 @@ class TradingState:
             if self.data["mode"] == "paper":
                 margin = notional / leverage
                 self.data["balance_cash"] -= margin
-            # 成交流水: 下单记录 (交易所同步补录不记, 由交易所回填负责真实历史)
+            # 成交流水: 下单记录(带真实开仓原因); 重启时交易所同步只补全 fees/pnl, 不覆盖本地原因
             if record:
                 self.record_order({
                     "ts": ts or time.time(),
