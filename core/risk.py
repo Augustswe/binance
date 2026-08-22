@@ -33,19 +33,23 @@ class RiskManager:
             return False, "名义价值<=0"
         if notional > self.risk["max_single_order_notional"]:
             return False, f"单笔{notional:.0f}U 超过上限 {self.risk['max_single_order_notional']}U"
-        if state.exposure() + notional > self.risk["max_total_position_notional"]:
-            return False, "总持仓超过上限"
-        # 总持仓敞口占权益上限 (max_total_exposure_pct, 0=关闭)
+        # 总持仓敞口上限: 百分比优先, 固定值仅在百分比关闭(=0)或权益未知时兜底
+        # (避免固定值静默压低你设的百分比, 如 5000U 账户上 2000U 盖掉 60%=3000U)
         pct = self.risk.get("max_total_exposure_pct", 0) or 0
+        projected = state.exposure() + notional
         if pct > 0:
             eq = state.equity()
             if eq > 0:
-                projected = state.exposure() + notional
                 if projected > eq * pct / 100.0:
                     return False, (
-                        f"总敞口占权益 {projected / eq * 100:.0f}% "
-                        f"超过上限 {pct:.0f}%"
+                        f"总敞口占权益 {projected / eq * 100:.0f}% 超过上限 {pct:.0f}%"
                     )
+            else:
+                if projected > float(self.risk["max_total_position_notional"]):
+                    return False, "总持仓超过上限"
+        else:
+            if projected > float(self.risk["max_total_position_notional"]):
+                return False, "总持仓超过上限"
         if len(d["positions"]) >= self.risk["max_positions"]:
             return False, "持仓数量达到上限"
         # 日亏损熔断

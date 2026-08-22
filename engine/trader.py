@@ -460,6 +460,21 @@ class TradingEngine:
             return 0.0, f"主网总持仓已达限额 {cap:.0f}U (当前敞口 {exposure:.0f}U)"
         return min(budget, remaining), None
 
+    def _total_exposure_cap(self) -> float:
+        """总持仓敞口上限: 百分比优先, 固定值仅在百分比关闭(=0)时兜底。
+
+        这样『固定数字』不会静默压低你设的百分比 —— 例如 5000U 账户上
+        max_total_position_notional=2000 原本会盖掉 60%=3000U 的设置, 现在百分比生效。
+        主网分级限额由 _apply_mainnet_cap 另行叠加, 不受此影响。
+        """
+        r = self.cfg["risk"]
+        pct = float(r.get("max_total_exposure_pct", 0) or 0)
+        if pct > 0:
+            eq = self.state.equity()
+            if eq > 0:
+                return eq * pct / 100.0
+        return float(r["max_total_position_notional"])
+
     def set_mainnet_custom_limit(self, limit: float) -> dict:
         """设置主网自定义限额 (仅 t3 档位允许; 否则拒绝)。写入 config.yaml 并热生效。"""
         info = self.mainnet_cap_info()
@@ -657,10 +672,7 @@ class TradingEngine:
         max_total = float(r["max_total_position_notional"])
         pct = float(r.get("max_total_exposure_pct", 0) or 0)
         eq = self.state.equity()
-        caps = [max_total]
-        if pct > 0 and eq > 0:
-            caps.append(eq * pct / 100.0)
-        cap = min(caps)
+        cap = self._total_exposure_cap()
         exp = self.state.exposure()
         if exp <= cap + 1e-6:
             return False
@@ -1060,7 +1072,7 @@ class TradingEngine:
         exposure = self.state.exposure()
         budget = min(
             float(self.cfg["risk"]["max_single_order_notional"]),
-            float(self.cfg["risk"]["max_total_position_notional"]) - exposure,
+            self._total_exposure_cap() - exposure,
         )
         if budget <= 0:
             return
@@ -1328,15 +1340,9 @@ class TradingEngine:
         margin_base = float(self.cfg["risk"].get(
             "margin_per_position", max_single / max(1, lev_max)
         ))
-        # 名义价值 = 保证金 × 杠杆 × 模式权重
+        # 名义价值 = 保证金 × 杠杆 × 模式权重; 总敞口上限由 _total_exposure_cap() 决定 (百分比优先)
         budget = min(margin_base * leverage * weight, max_single,
-                     float(self.cfg["risk"]["max_total_position_notional"]) - exposure)
-        # 总持仓敞口占权益上限 (max_total_exposure_pct, 0=关闭): 叠加权益比例封顶
-        exposure_pct_cap = float(self.cfg["risk"].get("max_total_exposure_pct", 0) or 0)
-        if exposure_pct_cap > 0:
-            eq = self.state.equity()
-            if eq > 0:
-                budget = min(budget, eq * exposure_pct_cap / 100.0 - exposure)
+                     self._total_exposure_cap() - exposure)
         if budget <= 0:
             return
         # 主网分级限额: 总持仓不得超过当前档位 cap (500/1000/自定义)
